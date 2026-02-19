@@ -13,7 +13,7 @@ Requirements:
     - 200 kt cruise speed at 7000 ft
     - 2 parallel hybrid-electric turboprops
     - 2600 ft takeoff and landing distance
-    - 350 nmi design range
+    - 350 nmi max range, optimized for 175 nmi typical mission
 
 Architecture: Parallel hybrid -- turboshaft and electric motor both
 drive the same propeller shaft via a combining gearbox. Electric boost
@@ -60,7 +60,8 @@ cruise_speed = 200 * u.knot              # 102.9 m/s
 cruise_altitude = 7000 * u.foot          # 2134 m
 field_length_req = 2600 * u.foot         # 792.5 m
 n_engines = 2
-design_range = 350 * u.naut_mile         # 648 km
+design_range_max = 350 * u.naut_mile      # 648 km, max range (fuel sizing)
+design_range_typical = 175 * u.naut_mile  # 324 km, typical mission (80% of flights)
 ultimate_load_factor = 1.5 * 3.0         # FAR 23 commuter
 CL_max = 2.2                             # With flaps, high wing
 g = 9.81
@@ -303,13 +304,32 @@ aero = asb.AeroBuildup(
     op_point=cruise_op_point,
 ).run()
 
-CL_cruise = aero["CL"]
-CD_cruise = aero["CD"]
-L_over_D_cruise = CL_cruise / CD_cruise
-drag_cruise = aero["D"]
-
 # Wing area from geometry
 wing_area = wing.area()
+
+# --- Miscellaneous Drag Correction ---
+# AeroBuildup omits protuberance drag (antennas, air scoops, door gaps,
+# cooling inlets/exits, gear fairings, exhaust stacks, etc.) and
+# underestimates interference drag for non-streamlined commuter
+# fuselages.
+#
+# Raymer Table 12.6: typical CDA_misc = 0.10-0.30 m^2 for turboprop
+# commuters. We use 0.20 m^2 for a 19-pax commuter with fixed gear
+# fairings, dual exhaust, antennas, and cooling openings.
+CDA_misc = 0.20  # m^2 flat-plate equivalent drag area
+
+# Interference / form-factor correction (fuselage-wing junction,
+# fuselage-nacelle junction, surface roughness exceedances, non-ideal
+# fuselage fineness ratio for a stubby commuter fuselage).
+drag_correction_factor = 1.10  # 10% increase on AeroBuildup base drag
+
+CD_misc = CDA_misc / wing_area
+CL_cruise = aero["CL"]
+CD_cruise = aero["CD"] * drag_correction_factor + CD_misc
+L_over_D_cruise = CL_cruise / CD_cruise
+
+q_cruise = 0.5 * cruise_atmo.density() * cruise_speed ** 2
+drag_cruise = CD_cruise * q_cruise * wing_area
 
 ##### Section: Weight Breakdown #####
 
@@ -537,9 +557,6 @@ fuel_burn_rate_cruise = shaft_power_cruise_total / (
     eta_thermal_cruise * fuel_specific_energy
 )
 
-cruise_time = design_range / cruise_speed
-fuel_for_cruise = fuel_burn_rate_cruise * cruise_time
-
 # 45-min VFR reserves
 fuel_reserve_time = 45 * 60
 fuel_reserves = fuel_burn_rate_cruise * fuel_reserve_time
@@ -549,7 +566,16 @@ climb_time = 10 * 60  # seconds
 climb_fuel_factor = 1.3  # Higher burn rate during climb
 fuel_for_climb = fuel_burn_rate_cruise * climb_fuel_factor * climb_time
 
-opti.subject_to(fuel_mass >= fuel_for_cruise + fuel_reserves + fuel_for_climb)
+# Fuel for max range mission (350 nmi) -- sizes fuel tanks and MTOW
+cruise_time_max = design_range_max / cruise_speed
+fuel_for_cruise_max = fuel_burn_rate_cruise * cruise_time_max
+
+opti.subject_to(fuel_mass >= fuel_for_cruise_max + fuel_reserves + fuel_for_climb)
+
+# Fuel for typical mission (175 nmi) -- used for cruise optimization
+cruise_time_typical = design_range_typical / cruise_speed
+fuel_for_cruise_typical = fuel_burn_rate_cruise * cruise_time_typical
+fuel_mass_typical = fuel_for_cruise_typical + fuel_reserves + fuel_for_climb
 
 # --- Takeoff Power (Hybrid Boost) ---
 total_power_takeoff_per_engine = power_per_turboshaft + electric_power_per_engine
@@ -580,9 +606,13 @@ wing_aspect_ratio = wing_span ** 2 / wing_area
 opti.subject_to(wing_aspect_ratio >= 8.0)   # Practical minimum for turboprop
 opti.subject_to(wing_aspect_ratio <= 14.0)  # Practical maximum
 
-# --- Cruise Lift = Weight ---
+# --- Cruise Lift = Weight (optimized for typical 175 nmi mission) ---
+# On a typical mission the aircraft takes off lighter than MTOW because
+# it carries only fuel_mass_typical instead of the full fuel_mass.
+# Mid-cruise weight accounts for half the typical cruise fuel burned.
 lift_cruise = 0.5 * cruise_atmo.density() * cruise_speed ** 2 * wing_area * CL_cruise
-mid_cruise_weight = (design_mass_TOGW - fuel_for_cruise * 0.5) * g
+typical_mission_TOGW = design_mass_TOGW - (fuel_mass - fuel_mass_typical)
+mid_cruise_weight = (typical_mission_TOGW - fuel_for_cruise_typical * 0.5) * g
 
 opti.subject_to(lift_cruise >= mid_cruise_weight * 0.99)
 opti.subject_to(lift_cruise <= mid_cruise_weight * 1.01)
@@ -672,14 +702,25 @@ print(f"  Propeller Diameter:      {sol(propeller_diameter):8.2f} m   ({sol(prop
 print(f"  Battery Capacity:        {sol(battery_capacity_Wh) / 1000:8.1f} kWh")
 print(f"  Battery Mass:            {m_batt_sol:8.1f} kg  ({m_batt_sol / u.lbm:8.0f} lb)")
 
+print(f"\n{'--- Aerodynamic Drag Breakdown ---':^72}")
+CD_aerobuildup = sol(aero["CD"])
+CD_total = sol(CD_cruise)
+CD_misc_sol = sol(CD_misc)
+print(f"  AeroBuildup CD (raw):    {CD_aerobuildup:8.5f}")
+print(f"  After 10% correction:    {CD_aerobuildup * 1.10:8.5f}")
+print(f"  Misc drag CD (CDA/S):    {CD_misc_sol:8.5f}  (CDA_misc = {CDA_misc:.2f} m^2)")
+print(f"  Total CD (corrected):    {CD_total:8.5f}")
+
 print(f"\n{'--- Cruise Performance ---':^72}")
 print(f"  Cruise Shaft Power:      {sol(shaft_power_cruise_total) / u.horsepower:8.0f} hp")
 print(f"  Cruise Throttle:         {sol(throttle_cruise):8.1%}")
 print(f"  Thermal Efficiency:      {sol(eta_thermal_cruise):8.1%}")
 print(f"  Cruise Fuel Burn:        {sol(fuel_burn_rate_cruise) * 3600:8.1f} kg/hr")
-print(f"  Fuel for Cruise:         {sol(fuel_for_cruise):8.0f} kg")
+print(f"  Fuel for Max Range:      {sol(fuel_for_cruise_max):8.0f} kg  (350 nmi)")
+print(f"  Fuel for Typical Range:  {sol(fuel_for_cruise_typical):8.0f} kg  (175 nmi)")
 print(f"  Fuel Reserves (45 min):  {sol(fuel_reserves):8.0f} kg")
 print(f"  Fuel for Climb:          {sol(fuel_for_climb):8.0f} kg")
+print(f"  Total Fuel (max range):  {sol(fuel_mass):8.0f} kg")
 
 print(f"\n{'--- Field Performance ---':^72}")
 print(f"  V_stall (SL):            {sol(field_results['V_stall']) / u.knot:8.1f} kts ({sol(field_results['V_stall']):8.1f} m/s)")
@@ -736,6 +777,12 @@ print(f"\n  Empty Weight Fraction:   {m_empty_sol / TOGW:.3f}")
 print(f"  Fuel Fraction:           {m_fuel_sol / TOGW:.3f}")
 print(f"  Battery Fraction:        {m_batt_sol / TOGW:.3f}")
 print(f"  Payload Fraction:        {payload_mass / TOGW:.3f}")
+
+print(f"\n{'--- Mission Profile ---':^72}")
+print(f"  Typical Mission:         {design_range_typical / u.naut_mile:.0f} nmi ({design_range_typical / 1000:.0f} km)")
+print(f"  Max Range Mission:       {design_range_max / u.naut_mile:.0f} nmi ({design_range_max / 1000:.0f} km)")
+print(f"  Typical Takeoff Weight:  {sol(typical_mission_TOGW):.0f} kg ({sol(typical_mission_TOGW) / u.lbm:.0f} lb)")
+print(f"  Max Takeoff Weight:      {TOGW:.0f} kg ({TOGW / u.lbm:.0f} lb)")
 
 print(f"\n{'--- Active Constraints ---':^72}")
 print(f"  BFL:       {sol(field_results['balanced_field_length']) / u.foot:.0f} ft vs {field_length_req / u.foot:.0f} ft limit")
