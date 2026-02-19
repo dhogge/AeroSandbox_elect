@@ -642,9 +642,15 @@ opti.subject_to(field_results["flight_path_angle_climb_one_engine_out"] >= 0.024
 # --- Mass Closure ---
 opti.subject_to(mass_total <= design_mass_TOGW)
 
+# --- MTOW Limit (FAR 23 commuter category: 19,000 lb) ---
+opti.subject_to(design_mass_TOGW <= 19000 * u.lbm)
+
 ##### Section: Objective #####
 
-opti.minimize(design_mass_TOGW)
+# Minimize fuel burn on the typical 175 nmi mission (80% of flights).
+# This favors aerodynamic efficiency (higher L/D) over minimum structure
+# weight, unlike a min-MTOW objective which penalizes wing size.
+opti.minimize(fuel_mass_typical)
 
 ##### Section: Solve #####
 
