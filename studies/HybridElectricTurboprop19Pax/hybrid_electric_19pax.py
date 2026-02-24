@@ -4,20 +4,24 @@ Conceptual Design of a Hybrid-Electric 19-Passenger Turboprop Aircraft
 
 Uses AeroSandbox's optimization framework (Opti) with:
 - AeroBuildup for aerodynamic analysis
-- Raymer cargo/transport + Torenbeek weight estimation methods
+- Raymer cargo/transport weight estimation + PEGASUS wing weight surrogate
 - Turboshaft + electric motor parallel hybrid propulsion model
+- Wingtip-mounted propellers with 15% propulsive efficiency bonus
 - Torenbeek field length analysis
 
 Requirements:
     - 19 passengers, 6000 lb payload
     - 200 kt cruise speed at 7000 ft
-    - 2 parallel hybrid-electric turboprops
+    - 2 parallel hybrid-electric turboprops with wingtip propellers
     - 2600 ft takeoff and landing distance
     - 350 nmi max range, optimized for 175 nmi typical mission
 
 Architecture: Parallel hybrid -- turboshaft and electric motor both
 drive the same propeller shaft via a combining gearbox. Electric boost
-during takeoff/climb, turboshaft-only during cruise.
+during takeoff/climb, turboshaft-only during cruise. Propellers are
+mounted at the wingtips, providing a 15% propulsive efficiency bonus
+from wingtip vortex energy recovery. Wing weight uses the PEGASUS
+surrogate model which accounts for outboard engine bending relief.
 """
 
 import aerosandbox as asb
@@ -51,6 +55,110 @@ from aerosandbox.library.weights.raymer_miscellaneous import (
     mass_lavatories,
 )
 
+##### Section: PEGASUS Wing Weight Model #####
+
+def wing_weight_pegasus(
+        wing_area=578.,
+        wing_ar=11.08,
+        wing_taper=0.547,
+        wing_af_thickness=0.14,
+        mtow=44000.,
+        battery_weight_ratio=0.35,
+        engine_inboard_weight=900.,
+        engine_inboard_eta=0.392,
+        engine_outboard_weight=1800.,
+        engine_outboard_eta=0.99,
+):
+    """
+    Estimate wing structural weight of the PEGASUS vehicle configuration for
+    integration with vehicle sizing tools like FLOPS or LEAPS.
+
+    All inputs in imperial units; returns total wing weight in lbs.
+
+    :param wing_area: Planform area (Wimpress method), sq. ft.
+    :param wing_ar: Aspect ratio (b^2 / S)
+    :param wing_taper: Taper ratio (c_t / c_r)
+    :param wing_af_thickness: Airfoil thickness-to-chord ratio
+    :param mtow: Maximum takeoff weight, lbs
+    :param battery_weight_ratio: Battery weight / MTOW
+    :param engine_inboard_weight: Inboard engine weight, lbs
+    :param engine_inboard_eta: Inboard engine normalized span location
+    :param engine_outboard_weight: Outboard engine weight, lbs
+    :param engine_outboard_eta: Outboard engine normalized span location
+    :return: Total wing structural weight, lbs
+    :rtype: float
+    """
+    estimate = (
+        (-763.654116272738)
+        + 66.6533463708713 * wing_ar
+        + 436.788492704573 * wing_taper
+        + 1.21715502571785 * wing_area
+        + -2950.25309234943 * wing_af_thickness
+        + 0.0163144157953134 * mtow
+        + -35.3096443123149 * battery_weight_ratio
+        + -0.0230719745324687 * engine_inboard_weight
+        + -152.537262155881 * engine_inboard_eta
+        + -0.078580212183211 * engine_outboard_weight
+        + -217.296864650889 * engine_outboard_eta
+        + (wing_ar - 11.089463482063) * ((wing_ar - 11.089463482063) * 3.32515028103463)
+        + (wing_ar - 11.089463482063) * ((wing_taper - 0.549316967122807) * 80.0810304968525)
+        + (wing_ar - 11.089463482063) * ((wing_area - 578.352162689163) * 0.0679869849011377)
+        + (wing_ar - 11.089463482063) * ((wing_af_thickness - 0.140046114226006) * -632.721055431577)
+        + (wing_ar - 11.089463482063) * ((mtow - 45067.1269825181) * 0.00235424149828414)
+        + (wing_ar - 11.089463482063) * ((battery_weight_ratio - 0.304891299969045) * -14.6950965049355)
+        + (wing_ar - 11.089463482063) * ((engine_inboard_weight - 901.045007855934) * -0.0045676649394544)
+        + (wing_ar - 11.089463482063) * ((engine_inboard_eta - 0.375467167887513) * -31.7948952878013)
+        + (wing_ar - 11.089463482063) * ((engine_outboard_weight - 1798.4504628483) * -0.0130605611336943)
+        + (wing_ar - 11.089463482063) * ((engine_outboard_eta - 0.844749104111456) * -49.7660905560111)
+        + (wing_taper - 0.549316967122807) * ((wing_taper - 0.549316967122807) * 208.043958071801)
+        + (wing_taper - 0.549316967122807) * ((wing_area - 578.352162689163) * 0.399566153569777)
+        + (wing_taper - 0.549316967122807) * ((wing_af_thickness - 0.140046114226006) * -4681.22845517446)
+        + (wing_taper - 0.549316967122807) * ((mtow - 45067.1269825181) * 0.0148168755374293)
+        + (wing_taper - 0.549316967122807) * ((battery_weight_ratio - 0.304891299969045) * -19.1906778245744)
+        + (wing_taper - 0.549316967122807) * ((engine_inboard_weight - 901.045007855934) * 0.0170718428289706)
+        + (wing_taper - 0.549316967122807) * ((engine_inboard_eta - 0.375467167887513) * -135.424552441368)
+        + (wing_taper - 0.549316967122807) * ((engine_outboard_weight - 1798.4504628483) * -0.057278134745046)
+        + (wing_taper - 0.549316967122807) * ((engine_outboard_eta - 0.844749104111456) * -174.466282246233)
+        + (wing_area - 578.352162689163) * ((wing_area - 578.352162689163) * -0.000188690713945717)
+        + (wing_area - 578.352162689163) * ((wing_af_thickness - 0.140046114226006) * -2.30265260237845)
+        + (wing_area - 578.352162689163) * ((mtow - 45067.1269825181) * 0.0000151058790758956)
+        + (wing_area - 578.352162689163) * ((battery_weight_ratio - 0.304891299969045) * 0.410596598562827)
+        + (wing_area - 578.352162689163) * ((engine_inboard_weight - 901.045007855934) * -0.0000233386805120355)
+        + (wing_area - 578.352162689163) * ((engine_inboard_eta - 0.375467167887513) * -0.0881905271304493)
+        + (wing_area - 578.352162689163) * ((engine_outboard_weight - 1798.4504628483) * -0.0000546839233665841)
+        + (wing_area - 578.352162689163) * ((engine_outboard_eta - 0.844749104111456) * -0.305520724576287)
+        + (wing_af_thickness - 0.140046114226006) * ((wing_af_thickness - 0.140046114226006) * 36135.7252036525)
+        + (wing_af_thickness - 0.140046114226006) * ((mtow - 45067.1269825181) * -0.129022665411152)
+        + (wing_af_thickness - 0.140046114226006) * ((battery_weight_ratio - 0.304891299969045) * -156.216624212617)
+        + (wing_af_thickness - 0.140046114226006) * ((engine_inboard_weight - 901.045007855934) * 0.455452785051827)
+        + (wing_af_thickness - 0.140046114226006) * ((engine_inboard_eta - 0.375467167887513) * 1651.39734196954)
+        + (wing_af_thickness - 0.140046114226006) * ((engine_outboard_weight - 1798.4504628483) * 0.437340687962727)
+        + (wing_af_thickness - 0.140046114226006) * ((engine_outboard_eta - 0.844749104111456) * 1793.27103669289)
+        + (mtow - 45067.1269825181) * ((mtow - 45067.1269825181) * 0.000000075413179298)
+        + (mtow - 45067.1269825181) * ((battery_weight_ratio - 0.304891299969045) * -0.000406171183132496)
+        + (mtow - 45067.1269825181) * ((engine_inboard_weight - 901.045007855934) * -0.0000003900624341104)
+        + (mtow - 45067.1269825181) * ((engine_inboard_eta - 0.375467167887513) * -0.00296434684811031)
+        + (mtow - 45067.1269825181) * ((engine_outboard_weight - 1798.4504628483) * -0.0000010065281736412)
+        + (mtow - 45067.1269825181) * ((engine_outboard_eta - 0.844749104111456) * -0.00230199459363745)
+        + (battery_weight_ratio - 0.304891299969045) * ((battery_weight_ratio - 0.304891299969045) * 136.188540688368)
+        + (battery_weight_ratio - 0.304891299969045) * ((engine_inboard_weight - 901.045007855934) * 0.123471075162514)
+        + (battery_weight_ratio - 0.304891299969045) * ((engine_inboard_eta - 0.375467167887513) * 90.7460647792041)
+        + (battery_weight_ratio - 0.304891299969045) * ((engine_outboard_weight - 1798.4504628483) * 0.0198872946728822)
+        + (battery_weight_ratio - 0.304891299969045) * ((engine_outboard_eta - 0.844749104111456) * 55.0181153025222)
+        + (engine_inboard_weight - 901.045007855934) * ((engine_inboard_weight - 901.045007855934) * 0.0000236389247774922)
+        + (engine_inboard_weight - 901.045007855934) * ((engine_inboard_eta - 0.375467167887513) * -0.09370310791469)
+        + (engine_inboard_weight - 901.045007855934) * ((engine_outboard_weight - 1798.4504628483) * 0.0000166647330951795)
+        + (engine_inboard_weight - 901.045007855934) * ((engine_outboard_eta - 0.844749104111456) * 0.0410735845461825)
+        + (engine_inboard_eta - 0.375467167887513) * ((engine_inboard_eta - 0.375467167887513) * -236.984105322582)
+        + (engine_inboard_eta - 0.375467167887513) * ((engine_outboard_weight - 1798.4504628483) * 0.0401404174385669)
+        + (engine_inboard_eta - 0.375467167887513) * ((engine_outboard_eta - 0.844749104111456) * -141.822798401132)
+        + (engine_outboard_weight - 1798.4504628483) * ((engine_outboard_weight - 1798.4504628483) * 0.0000168826355194513)
+        + (engine_outboard_weight - 1798.4504628483) * ((engine_outboard_eta - 0.844749104111456) * -0.0816642024504058)
+        + (engine_outboard_eta - 0.844749104111456) * ((engine_outboard_eta - 0.844749104111456) * 487.31877454063)
+    )
+    return estimate
+
+
 ##### Section: Mission Constants #####
 
 n_pax = 19
@@ -65,6 +173,9 @@ design_range_typical = 175 * u.naut_mile  # 324 km, typical mission (80% of flig
 ultimate_load_factor = 1.5 * 3.0         # FAR 23 commuter
 CL_max = 2.2                             # With flaps, high wing
 g = 9.81
+
+# Wingtip propeller efficiency bonus (vortex energy recovery)
+wingtip_propeller_efficiency_bonus = 1.15  # 15% propulsive efficiency gain
 
 # Fuel properties (Jet-A)
 fuel_density = 820          # kg/m^3
@@ -335,16 +446,7 @@ drag_cruise = CD_cruise * q_cruise * wing_area
 
 # -- Structural --
 
-# Wing (Torenbeek, more accurate)
-m_wing = torenbeek_wt.mass_wing(
-    wing=wing,
-    design_mass_TOGW=design_mass_TOGW,
-    ultimate_load_factor=ultimate_load_factor,
-    suspended_mass=design_mass_TOGW * 0.90,
-    never_exceed_airspeed=cruise_speed * 1.4,
-    max_airspeed_for_flaps=cruise_speed * 0.55,
-    main_gear_mounted_to_wing=True,
-)
+# Wing weight computed below (after propulsion section, needs motor/battery masses)
 
 # Horizontal stabilizer (Raymer)
 wing_to_hstab_distance = tail_arm
@@ -500,6 +602,23 @@ m_gearbox_each = mass_gearbox(
 )
 m_gearbox_total = m_gearbox_each * n_engines
 
+# Wing (PEGASUS surrogate model -- accounts for wingtip engine bending relief)
+wing_aspect_ratio = wing_span ** 2 / wing_area
+outboard_engine_weight_per_side = (m_motor_per_engine + m_esc_per_engine + m_propeller_each) / u.lbm
+
+m_wing = wing_weight_pegasus(
+    wing_area=wing_area / u.foot ** 2,
+    wing_ar=wing_aspect_ratio,
+    wing_taper=wing_taper_ratio,
+    wing_af_thickness=0.18,
+    mtow=design_mass_TOGW / u.lbm,
+    battery_weight_ratio=m_battery / design_mass_TOGW,
+    engine_inboard_weight=0.,
+    engine_inboard_eta=0.,
+    engine_outboard_weight=outboard_engine_weight_per_side,
+    engine_outboard_eta=0.95,
+) * u.lbm  # convert lbs -> kg
+
 # -- Payload / Cabin --
 m_pax = n_pax * mass_passenger
 m_seats = n_pax * mass_seat("passenger") + n_crew * mass_seat("flight_deck")
@@ -537,7 +656,7 @@ shaft_power_cruise_total = propeller_shaft_power_from_thrust(
     area_propulsive=propulsive_area,
     airspeed=cruise_speed,
     rho=cruise_atmo.density(),
-    propeller_coefficient_of_performance=0.85,
+    propeller_coefficient_of_performance=0.85 * wingtip_propeller_efficiency_bonus,
 )
 
 shaft_power_cruise_per_engine = shaft_power_cruise_total / n_engines
@@ -588,7 +707,7 @@ shaft_power_from_thrust_liftoff = propeller_shaft_power_from_thrust(
     area_propulsive=propulsive_area,
     airspeed=V_liftoff,
     rho=atmo_sl.density(),
-    propeller_coefficient_of_performance=0.80,
+    propeller_coefficient_of_performance=0.80 * wingtip_propeller_efficiency_bonus,
 )
 
 opti.subject_to(shaft_power_takeoff_total >= shaft_power_from_thrust_liftoff)
@@ -602,7 +721,6 @@ opti.subject_to(battery_capacity_Wh >= electric_energy_for_climb_Wh / battery_ma
 ##### Section: Constraints #####
 
 # --- Wing Geometry Constraints ---
-wing_aspect_ratio = wing_span ** 2 / wing_area
 opti.subject_to(wing_aspect_ratio >= 8.0)   # Practical minimum for turboprop
 opti.subject_to(wing_aspect_ratio <= 14.0)  # Practical maximum
 
