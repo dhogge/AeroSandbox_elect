@@ -1,6 +1,6 @@
 """
-Conceptual Design of a Hybrid-Electric 19-Passenger Turboprop Aircraft
-======================================================================
+Conceptual Design of a Hybrid-Electric 9-Passenger Turboprop Aircraft (Sub-12,500 lb)
+======================================================================================
 
 Uses AeroSandbox's optimization framework (Opti) with:
 - AeroBuildup for aerodynamic analysis
@@ -10,11 +10,12 @@ Uses AeroSandbox's optimization framework (Opti) with:
 - Torenbeek field length analysis
 
 Requirements:
-    - 19 passengers, 6000 lb payload
+    - 9 passengers, 4500 lb payload
     - 200 kt cruise speed at 7000 ft
     - 2 parallel hybrid-electric turboprops with wingtip propellers
     - 2600 ft takeoff and landing distance
     - 350 nmi max range, optimized for 175 nmi typical mission
+    - MTOW < 12,500 lb (FAR Part 23 light transport threshold)
 
 Architecture: Parallel hybrid -- turboshaft and electric motor both
 drive the same propeller shaft via a combining gearbox. Electric boost
@@ -161,9 +162,9 @@ def wing_weight_pegasus(
 
 ##### Section: Mission Constants #####
 
-n_pax = 19
+n_pax = 9
 n_crew = 2
-payload_mass = 6000 * u.lbm              # 2722 kg
+payload_mass = 4500 * u.lbm              # 2041 kg
 cruise_speed = 200 * u.knot              # 102.9 m/s
 cruise_altitude = 7000 * u.foot          # 2134 m
 field_length_req = 2600 * u.foot         # 792.5 m
@@ -191,7 +192,7 @@ fuse_length = 17.6             # m total
 fuse_cabin_width = 1.37        # m external width
 fuse_cabin_height = 1.47       # m external height
 nose_length = 2.7              # m
-cabin_length = 8.5             # m (19 pax, 2+1 abreast, ~0.76 m pitch)
+cabin_length = 8.5             # m
 tail_length = fuse_length - nose_length - cabin_length  # ~6.4 m
 
 # Tail geometry (fixed)
@@ -210,7 +211,7 @@ opti = asb.Opti()
 ##### Section: Design Variables #####
 
 design_mass_TOGW = opti.variable(
-    init_guess=7700, log_transform=True, lower_bound=4000, upper_bound=12000
+    init_guess=5000, log_transform=True, lower_bound=4000, upper_bound=5670
 )
 wing_span = opti.variable(
     init_guess=17.7, lower_bound=12, upper_bound=25
@@ -395,7 +396,7 @@ vstab = asb.Wing(
 
 # --- Assemble Airplane ---
 airplane = asb.Airplane(
-    name="HE-19 Hybrid Electric Turboprop",
+    name="HE-9 Hybrid Electric Turboprop (sub-12500 lb)",
     xyz_ref=[wing_x_le + 0.25 * wing_root_chord, 0, 0],
     wings=[wing, hstab, vstab],
     fuselages=[fuse],
@@ -762,8 +763,8 @@ opti.subject_to(field_results["flight_path_angle_climb_one_engine_out"] >= 0.024
 # --- Mass Closure ---
 opti.subject_to(mass_total <= design_mass_TOGW)
 
-# --- MTOW Limit (FAR 23 commuter category: 19,000 lb) ---
-opti.subject_to(design_mass_TOGW <= 19000 * u.lbm)
+# --- MTOW Limit (FAR Part 23 light transport: 12,500 lb) ---
+opti.subject_to(design_mass_TOGW <= 12500 * u.lbm)
 
 ##### Section: Objective #####
 
@@ -779,7 +780,7 @@ sol = opti.solve(max_iter=500)
 ##### Section: Results Summary #####
 
 print("=" * 72)
-print("   HE-19 HYBRID-ELECTRIC 19-PAX TURBOPROP -- DESIGN SUMMARY")
+print("   HE-9 HYBRID-ELECTRIC 9-PAX TURBOPROP (SUB-12,500 LB) -- DESIGN SUMMARY")
 print("=" * 72)
 
 # Extract solved values
@@ -917,6 +918,7 @@ print(f"  LDG dist:  {sol(field_results['landing_total_distance']) / u.foot:.0f}
 print(f"  OEI grad:  {sol(field_results['flight_path_angle_climb_one_engine_out']):.4f} vs 0.024 min")
 print(f"  AR:        {AR:.2f} vs [8.0, 14.0] bounds")
 print(f"  Hybrid:    {sol(hybridization_factor):.1%} vs [10%, 50%] bounds")
+print(f"  MTOW:      {TOGW / u.lbm:.0f} lb vs 12,500 lb limit")
 
 print("\n" + "=" * 72)
 
