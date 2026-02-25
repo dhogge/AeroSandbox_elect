@@ -459,13 +459,15 @@ m_hstab = raymer_wt.mass_hstab(
 )
 
 # Vertical stabilizer (Raymer)
+# +30% volume for hybrid tip propellers: asymmetric yaw on engine-out requires
+# additional V-stab authority.
 wing_to_vstab_distance = tail_arm * 0.95
 m_vstab = raymer_wt.mass_vstab(
     vstab=vstab,
     design_mass_TOGW=design_mass_TOGW,
     ultimate_load_factor=ultimate_load_factor,
     wing_to_vstab_distance=wing_to_vstab_distance,
-)
+) * 1.3
 
 # Fuselage (Raymer)
 m_fuselage = raymer_wt.mass_fuselage(
@@ -490,13 +492,13 @@ m_mlg = raymer_wt.mass_main_landing_gear(
     design_mass_TOGW=design_mass_TOGW,
     n_wheels=4,
     n_shock_struts=2,
-)
+) * 0.7  # Fixed gear: no retraction mechanism, ~70% of retractable weight
 
 m_nlg = raymer_wt.mass_nose_landing_gear(
     nose_gear_length=0.6,
     design_mass_TOGW=design_mass_TOGW,
     n_wheels=2,
-)
+) * 0.7  # Fixed gear
 
 # Nacelles
 nacelle_length = 1.8
@@ -583,13 +585,13 @@ m_battery = mass_battery_pack(
     battery_pack_cell_fraction=battery_pack_cell_fraction,
 )
 
-# Propellers (Torenbeek)
+# Propellers (Torenbeek) — ×0.35 for lightweight composite wingtip electric propellers
 total_power_per_propeller = power_per_turboshaft + electric_power_per_engine
 m_propeller_each = torenbeek_wt.mass_propeller(
     propeller_diameter=propeller_diameter,
     propeller_power=total_power_per_propeller,
     n_blades=4,
-)
+) * 0.35
 m_propellers_total = m_propeller_each * n_engines
 
 # Gearbox
