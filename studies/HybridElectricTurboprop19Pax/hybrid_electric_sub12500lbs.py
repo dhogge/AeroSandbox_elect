@@ -162,9 +162,9 @@ def wing_weight_pegasus(
 
 ##### Section: Mission Constants #####
 
-n_pax = 9
+n_pax = 15
 n_crew = 2
-payload_mass = 4500 * u.lbm              # 2041 kg
+payload_mass = 3750 * u.lbm              # 2041 kg
 cruise_speed = 200 * u.knot              # 102.9 m/s
 cruise_altitude = 7000 * u.foot          # 2134 m
 field_length_req = 2600 * u.foot         # 792.5 m
@@ -223,13 +223,13 @@ cruise_alpha = opti.variable(
     init_guess=3.0, lower_bound=-2, upper_bound=10
 )
 mass_turboshaft_per_engine = opti.variable(
-    init_guess=130, log_transform=True, lower_bound=50, upper_bound=300
+    init_guess=130, log_transform=True, lower_bound=50, upper_bound=400
 )
 propeller_diameter = opti.variable(
     init_guess=2.8, lower_bound=2.0, upper_bound=4.0
 )
 hybridization_factor = opti.variable(
-    init_guess=0.25, lower_bound=0.10, upper_bound=0.50
+    init_guess=0.25, lower_bound=0.10, upper_bound=0.60
 )
 battery_capacity_Wh = opti.variable(
     init_guess=50000, log_transform=True, lower_bound=5000, upper_bound=500000
@@ -573,7 +573,8 @@ electric_power_per_engine = (
     hybridization_factor / (1 - hybridization_factor) * power_per_turboshaft
 )
 
-m_motor_per_engine = mass_motor_electric(electric_power_per_engine, method="hobbyking")
+motor_power_density = 5000  # W/kg (5 kW/kg, aircraft-class certified electric motor)
+m_motor_per_engine = electric_power_per_engine / motor_power_density
 m_motor_total = m_motor_per_engine * n_engines
 
 m_esc_per_engine = mass_ESC(electric_power_per_engine)
@@ -604,23 +605,40 @@ m_gearbox_each = mass_gearbox(
     rpm_out=propeller_rpm,
 )
 m_gearbox_total = m_gearbox_each * n_engines
-
-# Wing (PEGASUS surrogate model -- accounts for wingtip engine bending relief)
+# Wing (Torenbeek method -- more accurate than PEGASUS surrogate for this class)
+# k_e = 0.90: wingtip-mounted propulsors provide significant bending relief
+# (more than standard underwing engines at k_e=0.95, but these are relatively
+# light motors rather than full turbofans, so not as aggressive as k_e=0.85).
 wing_aspect_ratio = wing_span ** 2 / wing_area
-outboard_engine_weight_per_side = (m_motor_per_engine + m_esc_per_engine + m_propeller_each) / u.lbm
 
-m_wing = wing_weight_pegasus(
-    wing_area=wing_area / u.foot ** 2,
-    wing_ar=wing_aspect_ratio,
-    wing_taper=wing_taper_ratio,
-    wing_af_thickness=0.18,
-    mtow=design_mass_TOGW / u.lbm,
-    battery_weight_ratio=m_battery / design_mass_TOGW,
-    engine_inboard_weight=0.,
-    engine_inboard_eta=0.,
-    engine_outboard_weight=outboard_engine_weight_per_side,
-    engine_outboard_eta=0.95,
-) * u.lbm  # convert lbs -> kg
+# V_NE ~ 1.4× cruise for FAR 23 commuter turboprops
+V_NE = cruise_speed * 1.40
+# V_flap ~ 1.8× stall speed (sea level)
+V_flap = V_stall_sl * 1.8
+
+# Suspended mass: everything the wing carries (total mass minus wing itself)
+# Use design TOGW as an approximation (wing mass is a small fraction)
+suspended_mass_approx = design_mass_TOGW * 0.92  # ~8% wing weight fraction
+
+m_wing_basic = torenbeek_wt.mass_wing_basic_structure(
+    wing=wing,
+    design_mass_TOGW=design_mass_TOGW,
+    ultimate_load_factor=ultimate_load_factor,
+    suspended_mass=suspended_mass_approx,
+    never_exceed_airspeed=V_NE,
+    main_gear_mounted_to_wing=False,
+    k_e=0.90,  # Wingtip propulsors bending relief
+)
+m_wing_hld = torenbeek_wt.mass_wing_high_lift_devices(
+    wing=wing,
+    max_airspeed_for_flaps=V_flap,
+    flap_deflection_angle=30,
+)
+m_wing_spoilers = torenbeek_wt.mass_wing_spoilers_and_speedbrakes(
+    wing=wing,
+    mass_basic_wing=m_wing_basic,
+)
+m_wing = m_wing_basic + 1.2 * (m_wing_hld + m_wing_spoilers)
 
 # -- Payload / Cabin --
 m_pax = n_pax * mass_passenger
@@ -724,7 +742,7 @@ opti.subject_to(battery_capacity_Wh >= electric_energy_for_climb_Wh / battery_ma
 ##### Section: Constraints #####
 
 # --- Wing Geometry Constraints ---
-opti.subject_to(wing_aspect_ratio >= 8.0)   # Practical minimum for turboprop
+opti.subject_to(wing_aspect_ratio >= 6.0)   # Practical minimum for turboprop
 opti.subject_to(wing_aspect_ratio <= 14.0)  # Practical maximum
 
 # --- Cruise Lift = Weight (optimized for typical 175 nmi mission) ---

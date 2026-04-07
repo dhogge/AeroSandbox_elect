@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>N² Diagram — BLI+WT 19-Pax Hybrid-Electric</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: #f5f5f5; display: flex; flex-direction: column;
+    align-items: center; padding: 24px;
+  }
+  h1 { font-size: 1.8rem; color: #333; margin-bottom: 6px; }
+  .subtitle { font-size: 1.05rem; color: #777; margin-bottom: 18px; }
+  .legend { display:flex; gap:22px; margin-bottom:16px; font-size:1.0rem; color:#555; }
+  .legend span { display:inline-flex; align-items:center; gap:5px; }
+  .swatch { width:16px; height:16px; border-radius:2px; display:inline-block; }
+  table { border-collapse: collapse; background: white;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.12); }
+  td {
+    width: 100px; height: 100px; text-align: center; vertical-align: middle;
+    font-size: 0.72rem; border: 1px solid #E0E0E0; position: relative;
+    cursor: default; overflow: hidden;
+  }
+  td.diag {
+    background: #2196F3; color: white; font-weight: 700;
+    font-size: 1.0rem; line-height: 1.3;
+  }
+  td.feed { background: #4CAF50; color: white; font-weight: 700; font-size: 1.4rem; }
+  td.back { background: #F44336; color: white; font-weight: 700; font-size: 1.4rem; }
+  td.empty { background: #FAFAFA; }
+
+  /* Tooltip */
+  .tooltip {
+    display: none; position: fixed; background: #333; color: #fff;
+    padding: 8px 12px; border-radius: 6px; font-size: 0.78rem;
+    max-width: 260px; z-index: 999; pointer-events: none;
+    line-height: 1.45; box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  }
+  .tooltip b { color: #8cf; }
+</style>
+</head>
+<body>
+<h1>N² Dependency Matrix — BLI+WT 19-Pax Hybrid-Electric</h1>
+<p class="subtitle">Source: BLI_Big.py &nbsp;|&nbsp; 20 design variables &nbsp;|&nbsp; 25 constraints</p>
+<div class="legend">
+  <span><span class="swatch" style="background:#2196F3"></span> Discipline</span>
+  <span><span class="swatch" style="background:#4CAF50"></span> Feed-forward coupling</span>
+  <span><span class="swatch" style="background:#F44336"></span> Feedback (iteration loop)</span>
+</div>
+<div class="tooltip" id="tip"></div>
+<table>
+
+<tr>
+<td class="diag">Design<br>Variables</td>
+<td class="feed" data-tip="Design
+Variables → Geometry|wing_span\nwing_root_chord\nvstab_span\nvstab_root_chord\nhstab_area\nhstab_AR\nprop_diameter\nbli_prop_diameter">8</td>
+<td class="feed" data-tip="Design
+Variables → Aero|cruise_alpha\ncruise_altitude">2</td>
+<td class="feed" data-tip="Design
+Variables → Propulsion|m_turboshaft\nhybrid_factor\nthrust_liftoff\nbli_thrust_liftoff\nprop_diameter\ncruise_altitude\nbli_motor_power\nbli_prop_diameter">8</td>
+<td class="feed" data-tip="Design
+Variables → Weights|TOGW\nwing_span\nfuel_mass\nbattery_Wh\nm_turboshaft\nprop_diameter\nhstab_area">7</td>
+<td class="feed" data-tip="Design
+Variables → Field
+Perf|TOGW\nthrust_liftoff\nthrust_oei_reduced\nbli_thrust_liftoff">4</td>
+<td class="feed" data-tip="Design
+Variables → Stability|x_cg_battery\nthrust_oei_reduced\nwing_span\nhstab_area">4</td>
+<td class="feed" data-tip="Design
+Variables → Fuel &
+Energy|fuel_mass\nbattery_Wh\nhybrid_factor">3</td>
+</tr>
+<tr>
+<td class="empty"></td>
+<td class="diag">Geometry</td>
+<td class="feed" data-tip="Geometry → Aero|wing_area\nwing_AR">2</td>
+<td class="feed" data-tip="Geometry → Propulsion|wingtip_prop_area\nbli_prop_area">2</td>
+<td class="feed" data-tip="Geometry → Weights|wing_area\nwing_AR\nvstab_area">3</td>
+<td class="feed" data-tip="Geometry → Field
+Perf|wing_area">1</td>
+<td class="feed" data-tip="Geometry → Stability|wing_area\nwing_MAC\nvstab_area\nwing_AR → a_w (lift-curve slope)">4</td>
+<td class="empty"></td>
+</tr>
+<tr>
+<td class="back" data-tip="Aero → Design
+Variables|lift ≈ weight (trim)">1</td>
+<td class="empty"></td>
+<td class="diag">Aero</td>
+<td class="feed" data-tip="Aero → Propulsion|drag_eff_cruise\ndrag_bli_wake_fill">2</td>
+<td class="feed" data-tip="Aero → Weights|L/D → m_fuselage (Raymer)">1</td>
+<td class="feed" data-tip="Aero → Field
+Perf|L/D_cruise → L/D_climb">1</td>
+<td class="empty"></td>
+<td class="empty"></td>
+</tr>
+<tr>
+<td class="empty"></td>
+<td class="empty"></td>
+<td class="empty"></td>
+<td class="diag">Propulsion</td>
+<td class="feed" data-tip="Propulsion → Weights|P_turboshaft\nP_electric\nm_bli_motor\nm_bli_esc\nm_bli_prop\nm_bli_nacelle">6</td>
+<td class="feed" data-tip="Propulsion → Field
+Perf|thrust_per_engine → OEI climb grad">1</td>
+<td class="empty"></td>
+<td class="feed" data-tip="Propulsion → Fuel &
+Energy|fuel_burn_rate\nP_electric\nE_bli_climb">3</td>
+</tr>
+<tr>
+<td class="back" data-tip="Weights → Design
+Variables|mass_total → TOGW">1</td>
+<td class="empty"></td>
+<td class="back" data-tip="Weights → Aero|mass_total → CL_req">1</td>
+<td class="back" data-tip="Weights → Propulsion|mass_total → req thrust\nV_stall → V_liftoff → TO power">2</td>
+<td class="diag">Weights</td>
+<td class="empty"></td>
+<td class="feed" data-tip="Weights → Stability|x_cg_aft\nx_cg_TOGW">2</td>
+<td class="empty"></td>
+</tr>
+<tr>
+<td class="back" data-tip="Field
+Perf → Design
+Variables|BFL → thrust_liftoff\nlanding_dist → wing_area">2</td>
+<td class="empty"></td>
+<td class="empty"></td>
+<td class="back" data-tip="Field
+Perf → Propulsion|BFL → thrust / power">1</td>
+<td class="empty"></td>
+<td class="diag">Field<br>Perf</td>
+<td class="empty"></td>
+<td class="empty"></td>
+</tr>
+<tr>
+<td class="back" data-tip="Stability → Design
+Variables|SM → hstab_area\nV_mc → vstab / thrust_oei\nx_cg → x_cg_battery">3</td>
+<td class="back" data-tip="Stability → Geometry|SM, V_h → vstab, hstab">1</td>
+<td class="empty"></td>
+<td class="empty"></td>
+<td class="empty"></td>
+<td class="empty"></td>
+<td class="diag">Stability</td>
+<td class="empty"></td>
+</tr>
+<tr>
+<td class="back" data-tip="Fuel &
+Energy → Design
+Variables|fuel_mass_typ → fuel_mass\ntotal_elec_energy → battery_Wh">2</td>
+<td class="empty"></td>
+<td class="empty"></td>
+<td class="empty"></td>
+<td class="back" data-tip="Fuel &
+Energy → Weights|fuel_mass → mass_total">1</td>
+<td class="empty"></td>
+<td class="empty"></td>
+<td class="diag">Fuel &<br>Energy</td>
+</tr>
+</table>
+<script>
+const tip = document.getElementById('tip');
+document.querySelectorAll('td[data-tip]').forEach(td => {
+  td.addEventListener('mouseenter', e => {
+    const parts = td.dataset.tip.split('|');
+    const header = parts[0];
+    const vars = parts[1] ? parts[1].split('\\n') : [];
+    tip.innerHTML = '<b>' + header + '</b><br>' +
+      vars.map(v => '• ' + v).join('<br>');
+    tip.style.display = 'block';
+  });
+  td.addEventListener('mousemove', e => {
+    tip.style.left = (e.clientX + 14) + 'px';
+    tip.style.top  = (e.clientY + 14) + 'px';
+  });
+  td.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+});
+</script>
+</body>
+</html>

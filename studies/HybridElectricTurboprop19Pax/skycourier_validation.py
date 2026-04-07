@@ -86,8 +86,8 @@ vstab_span_val = 3.5           # m (tall for T-tail)
 vstab_root_chord_val = 2.5     # m
 vstab_tip_chord_val = 1.2      # m
 
-# Strut-braced wing reduces wing bending moments → ~30% lighter wing
-strut_wing_weight_factor = 0.70
+# Strut-braced wing reduces wing bending moments → ~20% lighter wing
+strut_wing_weight_factor = 0.80
 
 # Fixed landing gear: lighter (no retraction mechanism) but draggier
 fixed_gear_weight_factor = 0.70
@@ -306,7 +306,7 @@ wing_area = wing.area()
 #   - Fixed landing gear and fairings (~0.15 m²)
 #   - Larger fuselage cross-section (more protuberances)
 #   - Antennas, scoops, door gaps, cooling inlets (~0.20 m²)
-CDA_misc = 0.40  # m² flat-plate equivalent drag area
+CDA_misc = 0.25  # m² flat-plate equivalent drag area
 
 drag_correction_factor = 1.10  # 10% on AeroBuildup base drag
 
@@ -446,8 +446,12 @@ m_fuel_system = raymer_wt.mass_fuel_system(
 # -- Propulsion (Conventional Turboprop -- no electric) --
 
 # Turboshaft
-power_per_turboshaft = power_turboshaft(mass_turboshaft_per_engine)
-m_turboshaft_total = mass_turboshaft_per_engine * n_engines
+# Corrective factor of .8 cause low engine weight
+
+power_per_turboshaft = power_turboshaft(mass_turboshaft_per_engine) * .8
+engine_installed_mass_factor = 1.0  # Accounts for accessories, mounts, exhaust, etc. 
+# doesnt help
+m_turboshaft_total = mass_turboshaft_per_engine * engine_installed_mass_factor * n_engines 
 
 # Propellers (Torenbeek)
 m_propeller_each = torenbeek_wt.mass_propeller(
@@ -563,7 +567,7 @@ opti.subject_to(shaft_power_takeoff_total >= shaft_power_from_thrust_liftoff)
 
 # --- Wing Geometry ---
 wing_aspect_ratio = wing_span ** 2 / wing_area
-opti.subject_to(wing_aspect_ratio >= 8.0)
+opti.subject_to(wing_aspect_ratio >= 10.0)
 opti.subject_to(wing_aspect_ratio <= 14.0)  # Strut-braced allows higher AR
 
 # --- Cruise Lift = Weight (typical mission) ---

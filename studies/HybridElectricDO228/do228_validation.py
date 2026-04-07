@@ -68,7 +68,7 @@ n_engines = 2
 design_range_max = 400 * u.naut_mile     # 741 km (max payload range)
 design_range_typical = 200 * u.naut_mile # 370 km (typical regional mission)
 ultimate_load_factor = 1.5 * 3.0         # FAR 23 commuter
-CL_max = 3.2                            # High wing + TNT airfoil + double-slotted flaps (STOL)
+CL_max = 3.4                           # High wing + TNT airfoil + double-slotted flaps (STOL)
 g = 9.81
 
 # Fuel properties (Jet-A)
@@ -461,7 +461,11 @@ m_fuel_system = raymer_wt.mass_fuel_system(
 
 # Turboshaft (TPE331 is single-shaft with integral gearbox)
 power_per_turboshaft = power_turboshaft(mass_turboshaft_per_engine)
-m_turboshaft_total = mass_turboshaft_per_engine * n_engines
+
+engine_installed_mass_factor = 1.0  # Accounts for accessories, mounts, exhaust, etc. 
+# Applied cause low engine weight
+# Man what
+m_turboshaft_total = mass_turboshaft_per_engine * engine_installed_mass_factor * n_engines
 
 # Propellers (Torenbeek)
 m_propeller_each = torenbeek_wt.mass_propeller(

@@ -6,22 +6,27 @@ Uses AeroSandbox's optimization framework (Opti) with:
 - AeroBuildup for aerodynamic analysis
 - Raymer cargo/transport weight estimation + PEGASUS wing weight surrogate
 - Turboshaft + electric motor parallel hybrid propulsion model
-- Wingtip-mounted propellers with 15% propulsive efficiency bonus
+- Quarter-span-mounted propellers (conventional placement)
 - Torenbeek field length analysis
+
+NO BLI (Boundary Layer Ingestion) — this is a conventional propeller
+configuration baseline for comparison with the BLI variant.
 
 Req
     - 19 passengers, 6000 lb payload
     - 200 kt cruise speed at 7000 ft
-    - 2 parallel hybrid-electric turboprops with wingtip propellers
+    - 2 parallel hybrid-electric turboprops at quarter span
     - 2600 ft takeoff and landing distance
     - 350 nmi max range, optimized for 175 nmi typical mission
 
-Architecture: Parallel hybrid -- turboshaft and electric motor both
+Architecture: Parallel hybrid -> turboshaft and electric motor both
 drive the same propeller shaft via a combining gearbox. Electric boost
 during takeoff/climb, turboshaft-only during cruise. Propellers are
-mounted at the wingtips, providing a 15% propulsive efficiency bonus
-from wingtip vortex energy recovery. Wing weight uses the PEGASUS
-surrogate model which accounts for outboard engine bending relief.
+mounted at the quarter-span location (η = 0.25), a conventional
+placement that avoids interference with the wingtip vortex system
+but provides some inboard bending relief from engine weight.
+Wing weight uses the PEGASUS surrogate model which accounts for
+engine bending relief at the quarter-span location.
 """
 
 import aerosandbox as asb
@@ -107,28 +112,33 @@ ultimate_load_factor = 1.5 * 3.0         # FAR 23 commuter
 CL_max = 2.4                             # With flaps, high wing
 g = 9.81
 
-# Wingtip propeller efficiency bonus (vortex energy recovery)
-wingtip_propeller_efficiency_bonus = 1.15  # 15% propulsive efficiency gain
+# Quarter-span propeller location (normalized semi-span)
+engine_eta = 0.25  # Propellers at 25% semi-span
 
 # Fuel properties (Jet-A)
-fuel_density = 820          # kg/m^3
-fuel_specific_energy = 43.02e6  # J/kg, lower heating value
+fuel_density = 820 
+fuel_specific_energy = 43.02e6 
 
 # Battery properties
-battery_cell_specific_energy = 350   # Wh/kg at cell level
-battery_pack_cell_fraction = 0.70    # Pack-level derating
-battery_max_dod = 0.80               # Max depth of discharge
+battery_cell_specific_energy = 350
+battery_pack_cell_fraction = 0.70 
+battery_max_dod = 0.80 
 
 # Fuselage geometry 
-fuse_length = 16             # m total
-fuse_cabin_width = 1.9        # m external width
-fuse_cabin_height = 1.85      # m external height
+fuse_length = 16    
+fuse_cabin_width = 1.9  
+fuse_cabin_height = 1.85   
 nose_length = 2.5             
 cabin_length = 7.1             
 tail_length = fuse_length - nose_length - cabin_length  
 
+# Nacelle geometry
+nacelle_length = 1.8
+nacelle_width = 0.7
+nacelle_height = 0.7
+
 # Tail geometry
-tail_arm = 7.0                 # m, wing AC to tail AC
+tail_arm = 7.0  #wing AC to tail AC
 
 ##### Section: Optimization Setup #####
 
@@ -141,7 +151,7 @@ cruise_altitude = opti.variable(
 )
 
 design_mass_TOGW = opti.variable(
-    init_guess=7700, log_transform=True, lower_bound=4000, upper_bound=19000
+    init_guess=7700, log_transform=True, lower_bound=4000, upper_bound=18000
 )
 wing_span = opti.variable(
     init_guess=17.7, lower_bound=10, upper_bound=25
@@ -156,7 +166,7 @@ mass_turboshaft_per_engine = opti.variable(
     init_guess=130, log_transform=True, lower_bound=50, upper_bound=400
 )
 propeller_diameter = opti.variable(
-    init_guess=2.8, lower_bound=2.0, upper_bound=4.0
+    init_guess=2.8, lower_bound=1.0, upper_bound=3.0
 )
 hybridization_factor = opti.variable(
     init_guess=0.25, lower_bound=0.20, upper_bound=0.70
@@ -171,11 +181,17 @@ thrust_at_liftoff = opti.variable(
     init_guess=7700 * g * 0.30, log_transform=True, lower_bound=5000
 )
 
-# OEI operative-wingtip reduced thrust (optimizer can throttle back
-# the surviving wingtip to cut yaw moment → smaller vtail)
-thrust_wingtip_oei_reduced = opti.variable(
+# Cabin floor, goes wherever best for CG
+x_cg_battery = opti.variable(
+    init_guess=nose_length + 0.25 * cabin_length,
+    lower_bound=nose_length + 0.5, 
+    upper_bound=nose_length + cabin_length - 0.5,      
+)  # from nose
+
+# OEI: surviving engine reduced thrust for Vmc control
+thrust_oei_reduced = opti.variable(
     init_guess=5000, lower_bound=100, log_transform=True
-)  # Newtons – thrust the operative wingtip is set to during OEI
+)  # Newtons – thrust the operative engine is set to during OEI
 
 # Vertical stabilizer sizing (engine-out directional control)
 vstab_span_val = opti.variable(
@@ -188,8 +204,7 @@ vstab_taper_ratio = 0.5
 vstab_tip_chord_val = vstab_root_chord_val * vstab_taper_ratio
 vstab_area = (vstab_root_chord_val + vstab_tip_chord_val) / 2 * vstab_span_val
 
-# Horizontal stabilizer sizing (Longitudinal stability via Volume Coefficient)
-# Optimization variables for hstab
+# Horizontal stabilizer sizing
 hstab_area = opti.variable(
     init_guess=8.0, lower_bound=3.0, upper_bound=15.0
 )
@@ -210,7 +225,7 @@ wing_mean_chord = (wing_root_chord + wing_tip_chord) / 2
 
 ##### Section: Aircraft Geometry #####
 
-# --- Fuselage ---
+#  Fuselage 
 fuse = asb.Fuselage(
     name="Fuselage",
     xsecs=[
@@ -244,15 +259,15 @@ fuse = asb.Fuselage(
         ),
         asb.FuselageXSec(  # Tail tip
             xyz_c=[fuse_length, 0, 0.5],
-            width=0.15,
-            height=0.15,
+            width=0.40,
+            height=0.40,
         ),
     ],
 )
 
-# --- Main Wing (HIGH wing) ---
+#  Main Wing (HIGH wing) 
 wing_x_le = 0.40 * fuse_length - 0.25 * wing_root_chord
-wing_z_le = 0.5 * fuse_cabin_height  # High wing: on top of fuselage
+wing_z_le = 0.5 * fuse_cabin_height 
 
 flap = asb.ControlSurface(
     name="Flap", symmetric=True, deflection=0, hinge_point=0.75
@@ -291,12 +306,12 @@ wing = asb.Wing(
             ],
             chord=wing_tip_chord,
             twist=-1,
-            airfoil=asb.Airfoil("naca23012"),
+            airfoil=asb.Airfoil("naca23015"),
         ),
     ],
 ).translate([wing_x_le, 0, wing_z_le])
 
-# --- Horizontal Stabilizer ---
+#  Horizontal Stabilizer 
 elevator = asb.ControlSurface(
     name="Elevator", symmetric=True, deflection=0, hinge_point=0.70
 )
@@ -304,19 +319,18 @@ elevator = asb.ControlSurface(
 # Initial hstab x position (based on tail arm)
 hstab_x_le = wing_x_le + 0.25 * wing_root_chord + tail_arm - 0.25 * hstab_root_chord_val
 
-# --- Vertical Stabilizer ---
+#  Vertical Stabilizer 
 rudder = asb.ControlSurface(
     name="Rudder", symmetric=True, deflection=0, hinge_point=0.70
 )
 
-vstab_x_le = hstab_x_le - 0.5
 vstab_z_le = 0.3
 
 # T-tail configuration: Place hstab on top of vstab (z direction)
 hstab_z_le = vstab_z_le + vstab_span_val
 
-# Shift hstab aft to account for vstab sweep (x direction)
-hstab_x_le += vstab_span_val * np.tand(30) + 0.2
+# Position vstab so its tip LE aligns with the hstab root LE (proper T-tail)
+vstab_x_le = hstab_x_le - vstab_span_val * np.tand(30)
 
 vstab = asb.Wing(
     name="Vertical Stabilizer",
@@ -362,12 +376,34 @@ hstab = asb.Wing(
     ],
 ).translate([hstab_x_le, 0, hstab_z_le])
 
-# --- Assemble Airplane ---
+#  Quarter-span propulsors (conventional wing-mounted) 
+y_engine = engine_eta * wing_span / 2  # Spanwise position of each engine
+wing_sweep_LE = 3  # degrees
+x_engine = wing_x_le + y_engine * np.tand(wing_sweep_LE)
+z_engine = wing_z_le + y_engine * np.tand(2) - 0.5  # Below wing (tractor config)
+
+propulsor_left = asb.Propulsor(
+    name="Left Engine",
+    xyz_c=[x_engine, -y_engine, z_engine],
+    xyz_normal=[1, 0, 0],
+    radius=propeller_diameter / 2,
+    length=nacelle_length,
+)
+propulsor_right = asb.Propulsor(
+    name="Right Engine",
+    xyz_c=[x_engine, y_engine, z_engine],
+    xyz_normal=[1, 0, 0],
+    radius=propeller_diameter / 2,
+    length=nacelle_length,
+)
+
+#  Assemble Airplane 
 airplane = asb.Airplane(
-    name="HE-19 Hybrid Electric Turboprop",
+    name="HE-19 Hybrid Electric Turboprop (Quarter-Span Props)",
     xyz_ref=[wing_x_le + 0.25 * wing_root_chord, 0, 0],
     wings=[wing, hstab, vstab],
     fuselages=[fuse],
+    propulsors=[propulsor_left, propulsor_right],
 )
 
 ##### Section: Aerodynamic Analysis (Cruise) #####
@@ -387,20 +423,11 @@ aero = asb.AeroBuildup(
 # Wing area from geometry
 wing_area = wing.area()
 
-# --- Miscellaneous Drag Correction ---
-# AeroBuildup omits protuberance drag (antennas, air scoops, door gaps,
-# cooling inlets/exits, gear fairings, exhaust stacks, etc.) and
-# underestimates interference drag for non-streamlined commuter
-# fuselages.
-#
-# Raymer Table 12.6: typical CDA_misc = 0.10-0.30 m^2 for turboprop
-# commuters. We use 0.20 m^2 for a 19-pax commuter with fixed gear
-# fairings, dual exhaust, antennas, and cooling openings.
-CDA_misc = 0.20  # m^2 flat-plate equivalent drag area
+# Miscellaneous Drag Correction 
+# AeroBuildup omits protuberance drag (random stuff)
+CDA_misc = 0.20 
 
-# Interference / form-factor correction (fuselage-wing junction,
-# fuselage-nacelle junction, surface roughness exceedances, non-ideal
-# fuselage fineness ratio for a stubby commuter fuselage).
+# Drag correction factor
 drag_correction_factor = 1.10  # 10% increase on AeroBuildup base drag
 
 CD_misc = CDA_misc / wing_area
@@ -411,11 +438,12 @@ L_over_D_cruise = CL_cruise / CD_cruise
 q_cruise = 0.5 * cruise_atmo.density() * cruise_speed ** 2
 drag_cruise = CD_cruise * q_cruise * wing_area
 
+# No BLI — all drag must be overcome by the wing-mounted propellers
+drag_effective_cruise = drag_cruise
+
 ##### Section: Weight Breakdown #####
 
-# -- Structural --
-
-# Wing weight computed below (after propulsion section, needs motor/battery masses)
+# -> Structural ->
 
 # Horizontal stabilizer (Raymer)
 wing_to_hstab_distance = tail_arm
@@ -428,7 +456,6 @@ m_hstab = raymer_wt.mass_hstab(
 )
 
 # Vertical stabilizer (Raymer)
-# Size now governed by V_mc constraint; no blanket scale factor.
 wing_to_vstab_distance = tail_arm * 0.95
 m_vstab = raymer_wt.mass_vstab(
     vstab=vstab,
@@ -460,18 +487,13 @@ m_mlg = raymer_wt.mass_main_landing_gear(
     design_mass_TOGW=design_mass_TOGW,
     n_wheels=4,
     n_shock_struts=2,
-) * 0.7  # Fixed gear: no retraction mechanism, ~70% of retractable weight
+) * 0.7  # Fixed gear: no retraction mechanism ~70% lighter
 
 m_nlg = raymer_wt.mass_nose_landing_gear(
     nose_gear_length=0.6,
     design_mass_TOGW=design_mass_TOGW,
     n_wheels=2,
 ) * 0.7  # Fixed gear
-
-# Nacelles
-nacelle_length = 1.8
-nacelle_width = 0.7
-nacelle_height = 0.7
 
 m_nacelles = raymer_wt.mass_nacelles(
     nacelle_length=nacelle_length,
@@ -483,7 +505,7 @@ m_nacelles = raymer_wt.mass_nacelles(
     engines_have_propellers=True,
 )
 
-# -- Systems --
+# -> Systems ->
 
 m_instruments = raymer_wt.mass_instruments(
     fuselage=fuse,
@@ -526,16 +548,13 @@ m_fuel_system = raymer_wt.mass_fuel_system(
     fraction_in_integral_tanks=1.0,
 )
 
-# -- Propulsion System (Hybrid-Electric) --
+# -> Propulsion System (Hybrid-Electric) ->
 
 # Turboshaft
 power_per_turboshaft = power_turboshaft(mass_turboshaft_per_engine)
 m_turboshaft_total = mass_turboshaft_per_engine * n_engines
 
 # Electric motor: sized as a fraction of total takeoff power
-# total_takeoff_power = turboshaft_power + electric_power
-# hybridization_factor = electric_power / total_takeoff_power
-# So: electric_power = hybridization_factor / (1 - hybridization_factor) * turboshaft_power
 electric_power_per_engine = (
     hybridization_factor / (1 - hybridization_factor) * power_per_turboshaft
 )
@@ -554,13 +573,13 @@ m_battery = mass_battery_pack(
     battery_pack_cell_fraction=battery_pack_cell_fraction,
 )
 
-# Propellers (Torenbeek) — ×0.35 for lightweight composite wingtip electric propellers
+# Propellers (Torenbeek)
 total_power_per_propeller = power_per_turboshaft + electric_power_per_engine
 m_propeller_each = torenbeek_wt.mass_propeller(
     propeller_diameter=propeller_diameter,
     propeller_power=total_power_per_propeller,
     n_blades=4,
-) * 0.35
+) * 0.35  # Lightweight composite
 m_propellers_total = m_propeller_each * n_engines
 
 # Gearbox
@@ -573,10 +592,6 @@ m_gearbox_each = mass_gearbox(
 )
 m_gearbox_total = m_gearbox_each * n_engines
 
-# Wing (Torenbeek method -- more accurate than PEGASUS surrogate for this class)
-# k_e = 0.90: wingtip-mounted propulsors provide significant bending relief
-# (more than standard underwing engines at k_e=0.95, but these are relatively
-# light motors rather than full turbofans, so not as aggressive as k_e=0.85).
 wing_aspect_ratio = wing_span ** 2 / wing_area
 
 # V_NE ~ 1.4× cruise for FAR 23 commuter turboprops
@@ -584,10 +599,9 @@ V_NE = cruise_speed * 1.40
 # V_flap ~ 1.8× stall speed (sea level)
 V_flap = V_stall_sl * 1.8
 
-# Suspended mass: everything the wing carries (total mass minus wing itself)
-# Use design TOGW as an approximation (wing mass is a small fraction)
-suspended_mass_approx = design_mass_TOGW * 0.92  # ~8% wing weight fraction
+suspended_mass_approx = design_mass_TOGW * 0.92  
 
+# Wing weight (Torenbeek)
 m_wing_basic = torenbeek_wt.mass_wing_basic_structure(
     wing=wing,
     design_mass_TOGW=design_mass_TOGW,
@@ -595,7 +609,7 @@ m_wing_basic = torenbeek_wt.mass_wing_basic_structure(
     suspended_mass=suspended_mass_approx,
     never_exceed_airspeed=V_NE,
     main_gear_mounted_to_wing=False,
-    k_e=0.90,  # Wingtip propulsors bending relief
+    k_e=0.90, 
 )
 m_wing_hld = torenbeek_wt.mass_wing_high_lift_devices(
     wing=wing,
@@ -608,12 +622,11 @@ m_wing_spoilers = torenbeek_wt.mass_wing_spoilers_and_speedbrakes(
 )
 m_wing = m_wing_basic + 1.2 * (m_wing_hld + m_wing_spoilers)
 
-# -- Payload / Cabin --
+# -> Payload / Cabin ->
 m_pax = n_pax * mass_passenger
 m_seats = n_pax * mass_seat("passenger") + n_crew * mass_seat("flight_deck")
 m_lavs = mass_lavatories(n_pax, aircraft_type="short-haul")
 
-# Flight controls (simplified: 2% MTOW typical for this class)
 m_flight_controls = 0.02 * design_mass_TOGW
 
 ##### Section: Total Weight #####
@@ -622,7 +635,7 @@ mass_empty = (
     # Structure
     m_wing + m_hstab + m_vstab + m_fuselage
     + m_mlg + m_nlg + m_nacelles
-    # Propulsion
+    # Propulsion (hybrid)
     + m_turboshaft_total + m_motor_total + m_esc_total
     + m_propellers_total + m_gearbox_total
     + m_fuel_system
@@ -635,22 +648,137 @@ mass_empty = (
 
 mass_total = mass_empty + payload_mass + fuel_mass + m_battery
 
+##### Section: CG, Neutral Point & Static Margin #####
+
+#  Mean Aerodynamic Chord (MAC) for trapezoidal wing 
+wing_MAC = (2 / 3) * wing_root_chord * (
+    1 + wing_taper_ratio + wing_taper_ratio ** 2
+) / (1 + wing_taper_ratio)
+
+# Spanwise station & LE x-position of MAC
+y_MAC = (wing_span / 6) * (1 + 2 * wing_taper_ratio) / (1 + wing_taper_ratio)
+x_MAC_le = wing_x_le + y_MAC * np.tand(wing_sweep_LE)
+
+# Wing aerodynamic center (quarter-chord of MAC)
+x_ac_wing = x_MAC_le + 0.25 * wing_MAC
+
+#  Component CG x-positions (x = 0 at nose, positive aft) 
+x_cg_wing = x_MAC_le + 0.40 * wing_MAC
+x_cg_hstab = hstab_x_le + 0.42 * (hstab_root_chord_val + hstab_tip_chord_val) / 2
+x_cg_vstab = vstab_x_le + 0.42 * (vstab_root_chord_val + vstab_tip_chord_val) / 2
+x_cg_fuselage = 0.45 * fuse_length
+x_cg_mlg = wing_x_le + 0.55 * wing_mean_chord
+x_cg_nlg = 0.80 * nose_length
+
+# Quarter-span-mounted propulsion (at engine_eta * semi-span)
+x_engine_cg = x_engine + 0.30 * nacelle_length  # Midway in nacelle
+x_cg_nacelles = x_engine_cg
+x_cg_turboshaft = x_engine_cg
+x_cg_motors = x_engine_cg
+x_cg_esc = x_engine_cg - 0.2
+x_cg_propellers = x_engine_cg - 0.4
+x_cg_gearbox = x_engine_cg
+
+# Fuel, battery, payload, systems
+x_cg_fuel = x_MAC_le + 0.35 * wing_MAC               # Integral wing tanks
+# x_cg_battery is an optimization variable (defined in Design Variables section)
+x_cg_fuel_system = x_cg_fuel
+x_cg_payload = nose_length + 0.50 * cabin_length      # Center of cabin
+x_cg_instruments = 0.15 * fuse_length                  # Cockpit area
+x_cg_electrical = 0.40 * fuse_length
+x_cg_furnishings = nose_length + 0.50 * cabin_length
+x_cg_aircon = nose_length + 0.25 * cabin_length
+x_cg_anti_ice = wing_x_le                              # Wing LE area
+x_cg_flight_controls = 0.40 * fuse_length
+x_cg_seats = nose_length + 0.50 * cabin_length
+x_cg_lavs = nose_length + cabin_length - 0.5
+
+#  CG at MTOW (full fuel, full payload, all items) 
+moment_TOGW = (
+    # Structure
+    m_wing * x_cg_wing
+    + m_hstab * x_cg_hstab
+    + m_vstab * x_cg_vstab
+    + m_fuselage * x_cg_fuselage
+    + m_mlg * x_cg_mlg
+    + m_nlg * x_cg_nlg
+    + m_nacelles * x_cg_nacelles
+    # Propulsion
+    + m_turboshaft_total * x_cg_turboshaft
+    + m_motor_total * x_cg_motors
+    + m_esc_total * x_cg_esc
+    + m_propellers_total * x_cg_propellers
+    + m_gearbox_total * x_cg_gearbox
+    # Systems
+    + m_fuel_system * x_cg_fuel_system
+    + m_instruments * x_cg_instruments
+    + m_electrical * x_cg_electrical
+    + m_furnishings * x_cg_furnishings
+    + m_ac * x_cg_aircon
+    + m_anti_ice * x_cg_anti_ice
+    + m_flight_controls * x_cg_flight_controls
+    + m_seats * x_cg_seats
+    + m_lavs * x_cg_lavs
+    # Operating items
+    + fuel_mass * x_cg_fuel
+    + m_battery * x_cg_battery
+    + payload_mass * x_cg_payload
+)
+x_cg_TOGW = moment_TOGW / mass_total
+
+#  CG at aft-loading (fuel depleted = zero-fuel weight) 
+mass_zfw = mass_total - fuel_mass
+x_cg_aft = (moment_TOGW - fuel_mass * x_cg_fuel) / mass_zfw
+
+#  Neutral Point (stick-fixed) 
+# Lift-curve slopes via Helmbold equation
+a_w = 2 * np.pi * wing_aspect_ratio / (2 + np.sqrt(4 + wing_aspect_ratio ** 2))
+a_h = 2 * np.pi * hstab_aspect_ratio / (2 + np.sqrt(4 + hstab_aspect_ratio ** 2))
+
+# Downwash gradient at hstab (T-tail: 15% less downwash than conventional)
+depsilon_dalpha = 2 * a_w / (np.pi * wing_aspect_ratio) * 0.85
+
+# Dynamic pressure ratio at hstab (T-tail above wing wake)
+eta_h = 0.90
+
+# Hstab AC (quarter-chord of mean chord)
+x_ac_hstab = hstab_x_le + 0.25 * (hstab_root_chord_val + hstab_tip_chord_val) / 2
+
+# Wing-tail neutral point (exact linearised solution, Etkin formulation)
+tail_lift_effectiveness = a_h * eta_h * (1 - depsilon_dalpha) * hstab_area
+wing_lift_effectiveness = a_w * wing_area
+x_np_wing_tail = (
+    wing_lift_effectiveness * x_ac_wing
+    + tail_lift_effectiveness * x_ac_hstab
+) / (wing_lift_effectiveness + tail_lift_effectiveness)
+
+# Fuselage destabilising shift (Munk-Multhopp, moves NP forward)
+K_f = 0.92
+fuselage_width_eff = fuse_cabin_width * 0.85
+delta_x_np_fuse = K_f * fuselage_width_eff ** 2 * fuse_length / wing_lift_effectiveness
+x_np = x_np_wing_tail - delta_x_np_fuse
+
+#  Static Margin 
+static_margin = (x_np - x_cg_aft) / wing_MAC        # At aft CG (critical for stability)
+static_margin_TOGW = (x_np - x_cg_TOGW) / wing_MAC  # At fwd CG (critical for trim)
+
 ##### Section: Propulsion and Performance #####
 
-# --- Cruise Power Balance (turboshaft only) ---
+#  Cruise Power Balance 
+# All props handle full aircraft drag (no BLI reduction)
 propulsive_area = n_engines * np.pi / 4 * propeller_diameter ** 2
 
+# Shaft power at cruise (turboshaft-only, no electric during cruise)
 shaft_power_cruise_total = propeller_shaft_power_from_thrust(
-    thrust_force=drag_cruise,
+    thrust_force=drag_effective_cruise,
     area_propulsive=propulsive_area,
     airspeed=cruise_speed,
     rho=cruise_atmo.density(),
-    propeller_coefficient_of_performance=0.85 * wingtip_propeller_efficiency_bonus,
+    propeller_coefficient_of_performance=0.85,
 )
 
 shaft_power_cruise_per_engine = shaft_power_cruise_total / n_engines
 
-# Turboshaft must handle all cruise power
 opti.subject_to(power_per_turboshaft >= shaft_power_cruise_per_engine * 1.05)
 
 # Cruise throttle and fuel consumption
@@ -674,49 +802,51 @@ climb_time = 10 * 60  # seconds
 climb_fuel_factor = 1.3  # Higher burn rate during climb
 fuel_for_climb = fuel_burn_rate_cruise * climb_fuel_factor * climb_time
 
-# Fuel for max range mission (350 nmi) -- sizes fuel tanks and MTOW
+# Fuel for max range mission (350 nmi) -> sizes fuel tanks and MTOW
 cruise_time_max = design_range_max / cruise_speed
 fuel_for_cruise_max = fuel_burn_rate_cruise * cruise_time_max
 
 opti.subject_to(fuel_mass >= fuel_for_cruise_max + fuel_reserves + fuel_for_climb)
 
-# Fuel for typical mission (175 nmi) -- used for cruise optimization
+# Fuel for typical mission (175 nmi) -> used for cruise optimization
 cruise_time_typical = design_range_typical / cruise_speed
 fuel_for_cruise_typical = fuel_burn_rate_cruise * cruise_time_typical
 fuel_mass_typical = fuel_for_cruise_typical + fuel_reserves + fuel_for_climb
 
-# --- Takeoff Power (Hybrid Boost) ---
+#  Takeoff Power (Hybrid Boost) 
+# Total liftoff thrust from both wing-mounted propellers
 total_power_takeoff_per_engine = power_per_turboshaft + electric_power_per_engine
 shaft_power_takeoff_total = total_power_takeoff_per_engine * n_engines
 
 V_liftoff = 1.2 * V_stall_sl
 
+# Shaft power required at liftoff
 shaft_power_from_thrust_liftoff = propeller_shaft_power_from_thrust(
     thrust_force=thrust_at_liftoff,
     area_propulsive=propulsive_area,
     airspeed=V_liftoff,
     rho=atmo_sl.density(),
-    propeller_coefficient_of_performance=0.80 * wingtip_propeller_efficiency_bonus,
+    propeller_coefficient_of_performance=0.80,
 )
 
 opti.subject_to(shaft_power_takeoff_total >= shaft_power_from_thrust_liftoff)
 
-# --- Battery Sizing ---
-electric_energy_for_climb = electric_power_per_engine * n_engines * climb_time  # Joules
-electric_energy_for_climb_Wh = electric_energy_for_climb / 3600
+#  Battery Sizing 
+# Battery only needs to cover electric boost during takeoff/climb
+# (turboshaft-only during cruise)
+electric_energy_climb = electric_power_per_engine * n_engines * climb_time  # Joules
 
-opti.subject_to(battery_capacity_Wh >= electric_energy_for_climb_Wh / battery_max_dod)
+total_electric_energy_Wh = electric_energy_climb / 3600
+
+opti.subject_to(battery_capacity_Wh >= total_electric_energy_Wh / battery_max_dod)
 
 ##### Section: Constraints #####
 
-# --- Wing Geometry Constraints ---
-opti.subject_to(wing_aspect_ratio >= 6.0)   # Practical minimum for turboprop
-opti.subject_to(wing_aspect_ratio <= 14.0)  # Practical maximum
+#  Wing Geometry Constraints 
+opti.subject_to(wing_aspect_ratio >= 6.0)
+opti.subject_to(wing_aspect_ratio <= 14.0)
 
-# --- Cruise Lift = Weight (optimized for typical 175 nmi mission) ---
-# On a typical mission the aircraft takes off lighter than MTOW because
-# it carries only fuel_mass_typical instead of the full fuel_mass.
-# Mid-cruise weight accounts for half the typical cruise fuel burned.
+#  Cruise Lift = Weight (optimized for typical 175 nmi mission) 
 lift_cruise = 0.5 * cruise_atmo.density() * cruise_speed ** 2 * wing_area * CL_cruise
 typical_mission_TOGW = design_mass_TOGW - (fuel_mass - fuel_mass_typical)
 mid_cruise_weight = (typical_mission_TOGW - fuel_for_cruise_typical * 0.5) * g
@@ -724,8 +854,8 @@ mid_cruise_weight = (typical_mission_TOGW - fuel_for_cruise_typical * 0.5) * g
 opti.subject_to(lift_cruise >= mid_cruise_weight * 0.99)
 opti.subject_to(lift_cruise <= mid_cruise_weight * 1.01)
 
-# --- Field Length ---
-L_over_D_climb = L_over_D_cruise * 0.65  # Reduced L/D in takeoff config
+#  Field Length 
+L_over_D_climb = L_over_D_cruise * 0.65
 
 field_results = field_length_analysis_torenbeek(
     design_mass_TOGW=design_mass_TOGW,
@@ -743,79 +873,70 @@ opti.subject_to(field_results["takeoff_total_distance"] <= field_length_req)
 opti.subject_to(field_results["landing_total_distance"] <= field_length_req)
 opti.subject_to(field_results["balanced_field_length"] <= field_length_req)
 
-# --- OEI Climb Gradient (FAR 23, 2 wingtip engines) ---
-# When one wingtip engine fails, the remaining propulsor is:
-#   - 1 operative wingtip engine (turboshaft + electric motor)
-# The pilot/FADEC can throttle the operative wingtip DOWN to reduce
-# the asymmetric yaw moment.  The optimizer chooses the best
-# `thrust_wingtip_oei_reduced` that satisfies BOTH the climb-gradient
-# AND V_mc constraints simultaneously.
-thrust_per_wingtip_engine = thrust_at_liftoff / n_engines
+#  Engine-Out (OEI) 
+# With engines at quarter-span, the yaw moment arm is smaller than
+# wingtip-mounted engines, easing Vmc requirements.
+thrust_per_engine = thrust_at_liftoff / n_engines
 
-# Operative-wingtip thrust may not exceed full per-engine capability
-opti.subject_to(thrust_wingtip_oei_reduced <= thrust_per_wingtip_engine)
+# Operative engine thrust may not exceed full per-engine capability
+opti.subject_to(thrust_oei_reduced <= thrust_per_engine)
 
-thrust_oei = thrust_wingtip_oei_reduced
+thrust_oei = thrust_oei_reduced  # Only one operative engine
 thrust_over_weight_oei = thrust_oei / (design_mass_TOGW * g)
 climb_gradient_oei = thrust_over_weight_oei - 1 / L_over_D_climb
 opti.subject_to(climb_gradient_oei >= 0.024)  # FAR 23 minimum for 2-engine class
 
-# --- Engine-Out Directional Control (V_mc <= V_stall, FAR 23.149) ---
-# Wingtip propellers create a large yaw moment when one engine fails.
-# Because the operative wingtip can be throttled back (the optimizer
-# chooses `thrust_wingtip_oei_reduced`), the yaw moment is set by
-# THAT reduced thrust, not the full per-engine value.
-#
-#   Yaw balance:  T_wingtip_reduced × y_engine = q_vmc × S_vt × CL_vt × l_vt
-#
-# Conservative: no credit for 5° bank toward operative engine;
+# Engine-Out Directional Control (V_mc <= V_stall, FAR 23) 
+# Quarter-span engines have a shorter yaw moment arm than wingtip engines.
 # +10% for windmilling drag on the dead-engine propeller.
-y_engine = wing_span / 2                           # Wingtip-mounted engine offset
-yaw_moment_oei = thrust_wingtip_oei_reduced * y_engine * 1.10  # +10% windmilling
+yaw_moment_oei = thrust_oei_reduced * y_engine * 1.10
 
-CL_vstab_max_rudder = 0.9      # Side-force coeff at max rudder deflection (~25°)
-l_vt = tail_arm * 0.95         # CG to vstab aerodynamic center
+CL_vstab_max_rudder = 0.9
+l_vt = tail_arm * 0.95
 
 q_vmc = yaw_moment_oei / (vstab_area * CL_vstab_max_rudder * l_vt)
 V_mc = np.sqrt(2 * q_vmc / atmo_sl.density())
 
-opti.subject_to(V_mc <= V_stall_sl)   # FAR 23.149: V_mc must not exceed V_s1
+opti.subject_to(V_mc <= V_stall_sl)
 
-# --- Hstab Sizing (Volume Coefficient) ---
-# Horizontal Tail Volume Coefficient (V_h) ensures longitudinal stability and control authority.
-# V_h = (S_h * l_h) / (S_w * c_mac)
-# Typical values for T-tail turboprops: 0.8 - 1.2 (Raymer Table 6.4)
-# We use 0.90 as a minimum for this STOL configuration.
-l_h = tail_arm  # Distance from wing AC to hstab AC
+#  Hstab Sizing (Volume Coefficient) 
+l_h = tail_arm  
 V_h_coefficient = (hstab_area * l_h) / (wing_area * wing_mean_chord)
 opti.subject_to(V_h_coefficient >= 0.90)
 
-# --- Vstab Geometry Limits ---
+#  Longitudinal Stability (Static Margin) 
+opti.subject_to(static_margin >= 0.05)  
+opti.subject_to(static_margin_TOGW <= 0.20)      
+
+# Vstab Geometry Limits 
 vstab_aspect_ratio = vstab_span_val ** 2 / vstab_area
 opti.subject_to(vstab_aspect_ratio >= 1.0)
 opti.subject_to(vstab_aspect_ratio <= 2.5)
 
-# --- Mass Closure ---
+# Propeller clearance: prop diameter must not extend beyond wing tip
+# At quarter span, ensure propeller doesn't hit the fuselage
+opti.subject_to(propeller_diameter / 2 <= y_engine - fuse_cabin_width / 2)
+
+# Mass Closure 
 opti.subject_to(mass_total <= design_mass_TOGW)
 
-# --- MTOW Limit (FAR 23 commuter category: 19,000 lb) ---
-opti.subject_to(design_mass_TOGW <= 19000 * u.lbm)
+#  MTOW Limit (FAR 23 commuter category: 19,000 lb) 
+opti.subject_to(design_mass_TOGW <= 18000 * u.lbm)
 
 ##### Section: Objective #####
 
 # Minimize fuel burn on the typical 175 nmi mission (80% of flights).
-# This favors aerodynamic efficiency (higher L/D) over minimum structure
-# weight, unlike a min-MTOW objective which penalizes wing size.
 opti.minimize(fuel_mass_typical)
 
 ##### Section: Solve #####
 
-sol = opti.solve(max_iter=500)
+sol = opti.solve(max_iter=1500)
 
 ##### Section: Results Summary #####
 
 print("=" * 72)
-print("   HE-19 HYBRID-ELECTRIC 19-PAX TURBOPROP -- DESIGN SUMMARY")
+print("   HE-19 HYBRID-ELECTRIC 19-PAX TURBOPROP (QUARTER-SPAN PROPS)")
+print("   NO BLI — CONVENTIONAL PROPELLER CONFIGURATION")
 print("=" * 72)
 
 # Extract solved values
@@ -828,7 +949,7 @@ c_root = sol(wing_root_chord)
 S_wing = sol(wing_area)
 AR = b ** 2 / S_wing
 
-print(f"\n{'--- Overall ---':^72}")
+print(f"\n{' Overall ':^72}")
 print(f"  MTOW:                    {TOGW:8.0f} kg  ({TOGW / u.lbm:8.0f} lb)")
 print(f"  Empty Weight:            {m_empty_sol:8.0f} kg  ({m_empty_sol / u.lbm:8.0f} lb)")
 print(f"  Payload:                 {payload_mass:8.0f} kg  ({payload_mass / u.lbm:8.0f} lb)")
@@ -837,8 +958,7 @@ print(f"  Battery Weight:          {m_batt_sol:8.0f} kg  ({m_batt_sol / u.lbm:8.
 print(f"  Useful Load:             {payload_mass + m_fuel_sol + m_batt_sol:8.0f} kg")
 print(f"  Cruise Altitude:         {sol(cruise_altitude) / u.foot:8.0f} ft")
 
-
-print(f"\n{'--- Geometry ---':^72}")
+print(f"\n{' Geometry ':^72}")
 print(f"  Wing Span:               {b:8.2f} m   ({b / u.foot:8.1f} ft)")
 print(f"  Wing Area:               {S_wing:8.1f} m^2 ({S_wing / u.foot**2:8.0f} ft^2)")
 print(f"  Aspect Ratio:            {AR:8.2f}")
@@ -847,6 +967,7 @@ print(f"  Tip Chord:               {sol(wing_tip_chord):8.2f} m")
 print(f"  Taper Ratio:             {wing_taper_ratio:8.2f}")
 print(f"  Fuselage Length:         {fuse_length:8.1f} m   ({fuse_length / u.foot:8.1f} ft)")
 print(f"  Wing Loading:            {TOGW * g / S_wing:8.1f} N/m^2 ({TOGW * g / S_wing / (u.lbf / u.foot**2):8.1f} psf)")
+print(f"  Engine Span Location:    {engine_eta * 100:8.0f}% semi-span ({sol(y_engine):8.2f} m)")
 print(f"  V-Stab Span:             {sol(vstab_span_val):8.2f} m")
 print(f"  V-Stab Root Chord:       {sol(vstab_root_chord_val):8.2f} m")
 print(f"  V-Stab Area:             {sol(vstab_area):8.2f} m^2")
@@ -854,25 +975,40 @@ print(f"  H-Stab Span:             {sol(hstab_span_val):8.2f} m")
 print(f"  H-Stab Area:             {sol(hstab_area):8.2f} m^2")
 print(f"  H-Stab V_h Coeff:        {sol(V_h_coefficient):8.2f}")
 
-print(f"\n{'--- Aerodynamics (Cruise @ {:.0f} ft) ---'.format(sol(cruise_altitude) / u.foot):^72}")
+print(f"\n{' CG & Stability ':^72}")
+print(f"  Wing MAC:                {sol(wing_MAC):8.2f} m")
+print(f"  Wing AC (x):             {sol(x_ac_wing):8.2f} m from nose")
+print(f"  CG at TOGW (x):         {sol(x_cg_TOGW):8.2f} m  ({sol((x_cg_TOGW - x_MAC_le) / wing_MAC) * 100:5.1f}% MAC)")
+print(f"  CG at ZFW / aft (x):    {sol(x_cg_aft):8.2f} m  ({sol((x_cg_aft - x_MAC_le) / wing_MAC) * 100:5.1f}% MAC)")
+print(f"  Neutral Point (x):      {sol(x_np):8.2f} m  ({sol((x_np - x_MAC_le) / wing_MAC) * 100:5.1f}% MAC)")
+print(f"  Fuse NP shift (fwd):    {sol(delta_x_np_fuse):8.2f} m")
+print(f"  Battery Position (x):   {sol(x_cg_battery):8.2f} m  ({(sol(x_cg_battery) - nose_length) / cabin_length * 100:5.1f}% cabin)")
+print(f"  Static Margin (TOGW):   {sol(static_margin_TOGW) * 100:8.1f}% MAC")
+print(f"  Static Margin (aft CG): {sol(static_margin) * 100:8.1f}% MAC")
+
+print(f"\n{' Aerodynamics (Cruise @ {:.0f} ft) '.format(sol(cruise_altitude) / u.foot):^72}")
 print(f"  CL:                      {sol(CL_cruise):8.4f}")
 print(f"  CD:                      {sol(CD_cruise):8.5f}")
 print(f"  L/D:                     {sol(L_over_D_cruise):8.1f}")
 print(f"  Alpha:                   {sol(cruise_alpha):8.1f} deg")
 print(f"  Cruise Drag:             {sol(drag_cruise):8.0f} N   ({sol(drag_cruise) / u.lbf:8.0f} lbf)")
 
-print(f"\n{'--- Propulsion (Wingtip Parallel Hybrid) ---':^72}")
+print(f"\n{' Propulsion (Quarter-Span Parallel Hybrid) ':^72}")
 print(f"  Turboshaft Mass (each):  {sol(mass_turboshaft_per_engine):8.1f} kg  ({sol(mass_turboshaft_per_engine) / u.lbm:8.0f} lb)")
 print(f"  Turboshaft Power (each): {sol(power_per_turboshaft) / u.horsepower:8.0f} hp  ({sol(power_per_turboshaft) / 1000:8.0f} kW)")
 print(f"  Turboshaft Power (total):{sol(power_per_turboshaft) * n_engines / u.horsepower:8.0f} hp")
 print(f"  Electric Motor (each):   {sol(electric_power_per_engine) / 1000:8.0f} kW  ({sol(electric_power_per_engine) / u.horsepower:8.0f} hp)")
 print(f"  Hybridization Factor:    {sol(hybridization_factor):8.1%}")
-print(f"  Wingtip TO Power (both): {sol(shaft_power_takeoff_total) / u.horsepower:8.0f} hp")
+print(f"  Total TO Power (both):   {sol(shaft_power_takeoff_total) / u.horsepower:8.0f} hp")
 print(f"  Propeller Diameter:      {sol(propeller_diameter):8.2f} m   ({sol(propeller_diameter) / u.foot:8.1f} ft)")
+
+print(f"\n{' Battery (takeoff/climb boost only) ':^72}")
 print(f"  Battery Capacity:        {sol(battery_capacity_Wh) / 1000:8.1f} kWh")
 print(f"  Battery Mass:            {m_batt_sol:8.1f} kg  ({m_batt_sol / u.lbm:8.0f} lb)")
+print(f"  Climb Electric Energy:   {sol(electric_energy_climb) / 3600 / 1000:8.1f} kWh")
+print(f"  Total Electric Energy:   {sol(total_electric_energy_Wh) / 1000:8.1f} kWh")
 
-print(f"\n{'--- Aerodynamic Drag Breakdown ---':^72}")
+print(f"\n{' Aerodynamic Drag Breakdown ':^72}")
 CD_aerobuildup = sol(aero["CD"])
 CD_total = sol(CD_cruise)
 CD_misc_sol = sol(CD_misc)
@@ -881,7 +1017,7 @@ print(f"  After 10% correction:    {CD_aerobuildup * 1.10:8.5f}")
 print(f"  Misc drag CD (CDA/S):    {CD_misc_sol:8.5f}  (CDA_misc = {CDA_misc:.2f} m^2)")
 print(f"  Total CD (corrected):    {CD_total:8.5f}")
 
-print(f"\n{'--- Cruise Performance ---':^72}")
+print(f"\n{' Cruise Performance ':^72}")
 print(f"  Cruise Shaft Power:      {sol(shaft_power_cruise_total) / u.horsepower:8.0f} hp")
 print(f"  Cruise Throttle:         {sol(throttle_cruise):8.1%}")
 print(f"  Thermal Efficiency:      {sol(eta_thermal_cruise):8.1%}")
@@ -892,7 +1028,7 @@ print(f"  Fuel Reserves (45 min):  {sol(fuel_reserves):8.0f} kg")
 print(f"  Fuel for Climb:          {sol(fuel_for_climb):8.0f} kg")
 print(f"  Total Fuel (max range):  {sol(fuel_mass):8.0f} kg")
 
-print(f"\n{'--- Field Performance ---':^72}")
+print(f"\n{' Field Performance ':^72}")
 print(f"  V_stall (SL):            {sol(field_results['V_stall']) / u.knot:8.1f} kts ({sol(field_results['V_stall']):8.1f} m/s)")
 print(f"  V_liftoff:               {sol(field_results['V_liftoff']) / u.knot:8.1f} kts")
 print(f"  Takeoff Ground Roll:     {sol(field_results['takeoff_ground_roll_distance']) / u.foot:8.0f} ft  ({sol(field_results['takeoff_ground_roll_distance']):8.0f} m)")
@@ -900,12 +1036,13 @@ print(f"  Takeoff Total Distance:  {sol(field_results['takeoff_total_distance'])
 print(f"  Balanced Field Length:   {sol(field_results['balanced_field_length']) / u.foot:8.0f} ft  ({sol(field_results['balanced_field_length']):8.0f} m)")
 print(f"  Landing Total Distance:  {sol(field_results['landing_total_distance']) / u.foot:8.0f} ft  ({sol(field_results['landing_total_distance']):8.0f} m)")
 print(f"  Climb Gradient (AEO):    {sol(field_results['flight_path_angle_climb']):8.4f} rad ({sol(field_results['flight_path_angle_climb']) * 100:8.2f}%)")
-print(f"  Climb Gradient (OEI):    {sol(field_results['flight_path_angle_climb_one_engine_out']):8.4f} rad ({sol(field_results['flight_path_angle_climb_one_engine_out']) * 100:8.2f}%)  (Torenbeek, conservative)")
-print(f"  Climb Gradient (OEI custom):{sol(climb_gradient_oei):8.4f} rad ({sol(climb_gradient_oei) * 100:8.2f}%)  (reduced wingtip)")
-print(f"  OEI Wingtip Thrust:      {sol(thrust_wingtip_oei_reduced):8.0f} N   ({sol(thrust_wingtip_oei_reduced) / u.lbf:8.0f} lbf)  [{sol(thrust_wingtip_oei_reduced)/sol(thrust_per_wingtip_engine)*100:.0f}% of max]")
+print(f"  Climb Gradient (OEI):    {sol(field_results['flight_path_angle_climb_one_engine_out']):8.4f} rad ({sol(field_results['flight_path_angle_climb_one_engine_out']) * 100:8.2f}%)  (Torenbeek)")
+print(f"  Climb Gradient (OEI):    {sol(climb_gradient_oei):8.4f} rad ({sol(climb_gradient_oei) * 100:8.2f}%)  (reduced thrust)")
+print(f"  OEI Thrust (reduced):    {sol(thrust_oei_reduced):8.0f} N   ({sol(thrust_oei_reduced) / u.lbf:8.0f} lbf)  [{sol(thrust_oei_reduced)/sol(thrust_per_engine)*100:.0f}% of max]")
 print(f"  Thrust/Weight (TO):      {sol(thrust_at_liftoff) / (TOGW * g):8.3f}")
+print(f"  V_mc:                    {sol(V_mc) / u.knot:8.1f} kts vs V_stall {sol(V_stall_sl) / u.knot:.1f} kts")
 
-print(f"\n{'--- Weight Breakdown ---':^72}")
+print(f"\n{' Weight Breakdown ':^72}")
 print(f"  {'Component':<28} {'Mass (kg)':>10} {'Mass (lb)':>10} {'% MTOW':>8}")
 print(f"  {'-'*28} {'-'*10} {'-'*10} {'-'*8}")
 
@@ -916,11 +1053,11 @@ weight_items = [
     ("Fuselage", sol(m_fuselage)),
     ("Main Landing Gear", sol(m_mlg)),
     ("Nose Landing Gear", sol(m_nlg)),
-    ("Nacelles (wingtip)", sol(m_nacelles)),
+    ("Nacelles", sol(m_nacelles)),
     ("Turboshaft Engines", sol(m_turboshaft_total)),
-    ("Wingtip Electric Motors", sol(m_motor_total)),
-    ("Wingtip ESCs", sol(m_esc_total)),
-    ("Wingtip Propellers", sol(m_propellers_total)),
+    ("Electric Motors", sol(m_motor_total)),
+    ("ESCs", sol(m_esc_total)),
+    ("Propellers", sol(m_propellers_total)),
     ("Gearboxes", sol(m_gearbox_total)),
     ("Fuel System", sol(m_fuel_system)),
     ("Instruments", sol(m_instruments)),
@@ -950,27 +1087,44 @@ print(f"  Fuel Fraction:           {m_fuel_sol / TOGW:.3f}")
 print(f"  Battery Fraction:        {m_batt_sol / TOGW:.3f}")
 print(f"  Payload Fraction:        {payload_mass / TOGW:.3f}")
 
-print(f"\n{'--- Mission Profile ---':^72}")
+print(f"\n{' Mission Profile ':^72}")
 print(f"  Typical Mission:         {design_range_typical / u.naut_mile:.0f} nmi ({design_range_typical / 1000:.0f} km)")
 print(f"  Max Range Mission:       {design_range_max / u.naut_mile:.0f} nmi ({design_range_max / 1000:.0f} km)")
 print(f"  Typical Takeoff Weight:  {sol(typical_mission_TOGW):.0f} kg ({sol(typical_mission_TOGW) / u.lbm:.0f} lb)")
 print(f"  Max Takeoff Weight:      {TOGW:.0f} kg ({TOGW / u.lbm:.0f} lb)")
 
-print(f"\n{'--- Active Constraints ---':^72}")
+print(f"\n{' Active Constraints ':^72}")
 print(f"  BFL:       {sol(field_results['balanced_field_length']) / u.foot:.0f} ft vs {field_length_req / u.foot:.0f} ft limit")
 print(f"  TO dist:   {sol(field_results['takeoff_total_distance']) / u.foot:.0f} ft vs {field_length_req / u.foot:.0f} ft limit")
 print(f"  LDG dist:  {sol(field_results['landing_total_distance']) / u.foot:.0f} ft vs {field_length_req / u.foot:.0f} ft limit")
-print(f"  OEI grad:  {sol(climb_gradient_oei):.4f} vs 0.024 min (reduced wingtip)")
+print(f"  OEI grad:  {sol(climb_gradient_oei):.4f} vs 0.024 min")
 print(f"  V_mc:      {sol(V_mc) / u.knot:.1f} kts vs V_stall {sol(V_stall_sl) / u.knot:.1f} kts")
-print(f"  OEI wingtip (reduced): {sol(thrust_wingtip_oei_reduced):,.0f} N  ({sol(thrust_wingtip_oei_reduced)/sol(thrust_per_wingtip_engine)*100:.0f}% of full)")
+print(f"  OEI thrust (reduced): {sol(thrust_oei_reduced):,.0f} N  ({sol(thrust_oei_reduced)/sol(thrust_per_engine)*100:.0f}% of full)")
 print(f"  AR:        {AR:.2f} vs [6.0, 14.0] bounds")
 print(f"  Hybrid:    {sol(hybridization_factor):.1%} vs [20%, 70%] bounds")
+print(f"  SM aft:    {sol(static_margin)*100:.1f}% MAC vs 5% min")
+print(f"  SM fwd:    {sol(static_margin_TOGW)*100:.1f}% MAC vs 20% max")
 
 print("\n" + "=" * 72)
 
-# --- Optional: Draw 3-view ---
+#  Optional: Draw 3-view 
 try:
     sol_airplane = sol(airplane)
-    sol_airplane.draw_three_view()
+    axs = sol_airplane.draw_three_view(show=False)
+
+    # Draw CG marker on every panel
+    cg_x = sol(x_cg_TOGW)
+    cg_y = 0.0
+    cg_z = 0.0
+    for ax in axs.flat:
+        ax.plot(
+            [cg_x], [cg_y], [cg_z],
+            marker="o", color="red", markersize=8, zorder=999,
+            label="CG",
+        )
+    axs[0, 0].legend(fontsize=8, loc="upper right")
+
+    import matplotlib.pyplot as plt
+    plt.show()
 except Exception:
     pass  # Skip drawing if display not available

@@ -1,0 +1,383 @@
+# =============================================================================
+# requirements.yaml — Requirements Traceability for BLI+WT (BLI_Big.py)
+# =============================================================================
+# Maps every opti.subject_to() constraint to its regulatory basis, limit value,
+# and verification method.  Consumed by requirements.py and BLI_Big.py.
+#
+# Schema per requirement:
+#   name:           Human-readable name
+#   far_section:    14 CFR Part 23 paragraph (or "–" for design choice)
+#   category:       regulatory | performance | geometry | stability | mass
+#   description:    One-line explanation
+#   constraint:     Symbolic expression (for documentation)
+#   limit:          Numeric threshold consumed by the sizing script
+#   units:          Physical units of the limit value
+#   direction:      ">=" or "<=" — how the constraint binds
+#   verification:   analysis | test | inspection | demonstration
+#   script_line:    Approximate line number in BLI_Big.py (for auditing)
+#   rationale:      Why this value was chosen
+# =============================================================================
+
+meta:
+  aircraft: "BLI+WT 19-Pax Hybrid-Electric Turboprop"
+  configuration_tag: "BLI+WT (BLI)"
+  script: "BLI_Big.py"
+  regulatory_basis: "14 CFR Part 23 (Amendment 64) — Normal Category"
+  n_pax: 19
+  payload_lb: 6000
+  cruise_speed_kts: 200
+  design_range_max_nmi: 350
+  design_range_typical_nmi: 175
+  date_created: "2026-02-28"
+  author: "ABU Hybrid-Electric Study"
+
+requirements:
+
+  # ---------------------------------------------------------------------------
+  # PERFORMANCE — Propulsion Sizing
+  # ---------------------------------------------------------------------------
+  REQ-001:
+    name: "BLI Motor Power Margin"
+    far_section: "–"
+    category: performance
+    description: "BLI electric motor must deliver ≥105% of cruise wake-filling shaft power"
+    constraint: "bli_motor_power >= shaft_power_cruise_bli * margin"
+    limit: 1.05
+    units: "–"
+    direction: ">="
+    verification: analysis
+    script_line: 847
+    rationale: "5% power margin for off-design conditions and motor derating"
+
+  REQ-002:
+    name: "Turboshaft Power Margin"
+    far_section: "–"
+    category: performance
+    description: "Each turboshaft must deliver ≥105% of cruise power (wingtip + BLI gen)"
+    constraint: "power_per_turboshaft >= shaft_power_cruise_per_engine_total * margin"
+    limit: 1.05
+    units: "–"
+    direction: ">="
+    verification: analysis
+    script_line: 861
+    rationale: "5% power margin for off-design, bleed, and accessory loads"
+
+  REQ-003:
+    name: "Fuel Sufficiency"
+    far_section: "23.2115"
+    category: performance
+    description: "On-board fuel must cover max-range cruise + reserves + climb"
+    constraint: "fuel_mass >= fuel_for_cruise_max + fuel_reserves + fuel_for_climb"
+    limit: null
+    units: "kg"
+    direction: ">="
+    verification: analysis
+    script_line: 890
+    rationale: "Ensures aircraft can complete 350 nmi max range with 45-min VFR reserves"
+
+  REQ-004:
+    name: "Wingtip Takeoff Power"
+    far_section: "–"
+    category: performance
+    description: "Combined wingtip shaft power at takeoff must meet liftoff thrust demand"
+    constraint: "shaft_power_takeoff_wingtip >= wingtip_shaft_power_from_thrust_liftoff"
+    limit: null
+    units: "W"
+    direction: ">="
+    verification: analysis
+    script_line: 916
+    rationale: "Ensures thrust available at 1.2 × V_stall liftoff speed"
+
+  REQ-005:
+    name: "BLI Motor Takeoff Power"
+    far_section: "–"
+    category: performance
+    description: "BLI motor power must meet liftoff thrust demand on tail pusher"
+    constraint: "bli_motor_power >= bli_shaft_power_from_thrust_liftoff"
+    limit: null
+    units: "W"
+    direction: ">="
+    verification: analysis
+    script_line: 927
+    rationale: "Ensures BLI pusher can deliver its share of takeoff thrust"
+
+  REQ-006:
+    name: "Battery Capacity for Climb"
+    far_section: "–"
+    category: performance
+    description: "Battery must store enough energy for electric boost during takeoff/climb"
+    constraint: "battery_capacity_Wh >= total_electric_energy_Wh / max_dod"
+    limit: 0.80
+    units: "–"
+    direction: "<="
+    verification: analysis
+    script_line: 942
+    rationale: "80% max depth of discharge to preserve battery cycle life"
+
+  # ---------------------------------------------------------------------------
+  # GEOMETRY — Wing & Propeller
+  # ---------------------------------------------------------------------------
+  REQ-007:
+    name: "Wing AR Lower Bound"
+    far_section: "–"
+    category: geometry
+    description: "Wing aspect ratio must be at least 6.0 for turboprop efficiency"
+    constraint: "wing_aspect_ratio >= limit"
+    limit: 6.0
+    units: "–"
+    direction: ">="
+    verification: analysis
+    script_line: 947
+    rationale: "Practical minimum AR for turboprop aircraft — ensures reasonable L/D"
+
+  REQ-008:
+    name: "Wing AR Upper Bound"
+    far_section: "–"
+    category: geometry
+    description: "Wing aspect ratio must not exceed 14.0 (structural/flutter)"
+    constraint: "wing_aspect_ratio <= limit"
+    limit: 14.0
+    units: "–"
+    direction: "<="
+    verification: analysis
+    script_line: 948
+    rationale: "Practical maximum AR — structural weight growth, flutter margin"
+
+  REQ-009:
+    name: "BLI Propeller Diameter Fit"
+    far_section: "–"
+    category: geometry
+    description: "BLI tail prop diameter must fit within 80% of fuselage tail height"
+    constraint: "bli_propeller_diameter <= fuse_cabin_height * limit"
+    limit: 0.80
+    units: "–"
+    direction: "<="
+    verification: inspection
+    script_line: 1043
+    rationale: "Geometric clearance: prop disc must fit the tail cone cross-section"
+
+  # ---------------------------------------------------------------------------
+  # PERFORMANCE — Cruise Lift Trim
+  # ---------------------------------------------------------------------------
+  REQ-010:
+    name: "Cruise Lift Balance (Lower)"
+    far_section: "–"
+    category: performance
+    description: "Cruise lift must be within ±1% of mid-cruise weight"
+    constraint: "lift_cruise >= mid_cruise_weight * limit"
+    limit: 0.99
+    units: "–"
+    direction: ">="
+    verification: analysis
+    script_line: 958
+    rationale: "Trim constraint — lift must match weight within solver tolerance"
+
+  REQ-011:
+    name: "Cruise Lift Balance (Upper)"
+    far_section: "–"
+    category: performance
+    description: "Cruise lift must be within ±1% of mid-cruise weight"
+    constraint: "lift_cruise <= mid_cruise_weight * limit"
+    limit: 1.01
+    units: "–"
+    direction: "<="
+    verification: analysis
+    script_line: 959
+    rationale: "Trim constraint — lift must match weight within solver tolerance"
+
+  # ---------------------------------------------------------------------------
+  # REGULATORY — Field Performance
+  # ---------------------------------------------------------------------------
+  REQ-012:
+    name: "Takeoff Distance"
+    far_section: "23.2115(a)"
+    category: regulatory
+    description: "Takeoff total distance must not exceed field length requirement"
+    constraint: "takeoff_total_distance <= limit"
+    limit: 792.5
+    units: "m"
+    direction: "<="
+    verification: analysis
+    script_line: 976
+    rationale: "2600 ft field length requirement for target unimproved strips"
+
+  REQ-013:
+    name: "Landing Distance"
+    far_section: "23.2115(a)"
+    category: regulatory
+    description: "Landing distance must not exceed field length requirement"
+    constraint: "landing_total_distance <= limit"
+    limit: 792.5
+    units: "m"
+    direction: "<="
+    verification: analysis
+    script_line: 977
+    rationale: "2600 ft field length requirement (same as takeoff)"
+
+  REQ-014:
+    name: "Balanced Field Length"
+    far_section: "23.2115(c)"
+    category: regulatory
+    description: "BFL must not exceed field length requirement"
+    constraint: "balanced_field_length <= limit"
+    limit: 792.5
+    units: "m"
+    direction: "<="
+    verification: analysis
+    script_line: 978
+    rationale: "Accelerate-stop / accelerate-go decision point within 2600 ft"
+
+  # ---------------------------------------------------------------------------
+  # REGULATORY — Engine Out
+  # ---------------------------------------------------------------------------
+  REQ-015:
+    name: "OEI Wingtip Thrust Cap"
+    far_section: "–"
+    category: performance
+    description: "OEI reduced wingtip thrust may not exceed full per-engine capability"
+    constraint: "thrust_wingtip_oei_reduced <= thrust_per_wingtip_engine"
+    limit: null
+    units: "N"
+    direction: "<="
+    verification: analysis
+    script_line: 992
+    rationale: "Cannot command more thrust than the engine is capable of"
+
+  REQ-016:
+    name: "OEI Climb Gradient"
+    far_section: "23.2120(b)"
+    category: regulatory
+    description: "One-engine-inoperative climb gradient must meet FAR 23 minimum"
+    constraint: "climb_gradient_oei >= limit"
+    limit: 0.024
+    units: "–"
+    direction: ">="
+    verification: analysis
+    script_line: 997
+    rationale: "FAR 23 minimum net climb gradient for twin-engine class (2.4%)"
+
+  REQ-017:
+    name: "Minimum Control Speed"
+    far_section: "23.2135 (23.149)"
+    category: regulatory
+    description: "V_mc must not exceed stall speed"
+    constraint: "V_mc <= V_stall_sl"
+    limit: null
+    units: "m/s"
+    direction: "<="
+    verification: analysis
+    script_line: 1017
+    rationale: "FAR 23.149 — ensures controllability at any speed above stall"
+
+  # ---------------------------------------------------------------------------
+  # STABILITY — Tail Sizing
+  # ---------------------------------------------------------------------------
+  REQ-018:
+    name: "Horizontal Tail Volume Coefficient"
+    far_section: "–"
+    category: stability
+    description: "Hstab volume coefficient must meet minimum for longitudinal authority"
+    constraint: "V_h_coefficient >= limit"
+    limit: 0.90
+    units: "–"
+    direction: ">="
+    verification: analysis
+    script_line: 1026
+    rationale: "Typical turboprop range 0.8–1.2; SkyCourier benchmark ≈ 0.9"
+
+  REQ-019:
+    name: "Static Margin Lower Bound"
+    far_section: "–"
+    category: stability
+    description: "Static margin must be at least 5% MAC for positive stability"
+    constraint: "static_margin >= limit"
+    limit: 0.05
+    units: "MAC fraction"
+    direction: ">="
+    verification: analysis
+    script_line: 1032
+    rationale: "Minimum positive longitudinal static stability"
+
+  REQ-020:
+    name: "Static Margin Upper Bound"
+    far_section: "–"
+    category: stability
+    description: "Static margin must not exceed 20% MAC (control authority)"
+    constraint: "static_margin_TOGW <= limit"
+    limit: 0.20
+    units: "MAC fraction"
+    direction: "<="
+    verification: analysis
+    script_line: 1033
+    rationale: "Excessive forward CG requires too much elevator authority"
+
+  REQ-021:
+    name: "Vstab AR Lower Bound"
+    far_section: "–"
+    category: geometry
+    description: "Vertical stabilizer aspect ratio minimum"
+    constraint: "vstab_aspect_ratio >= limit"
+    limit: 1.0
+    units: "–"
+    direction: ">="
+    verification: analysis
+    script_line: 1037
+    rationale: "Prevents excessively stubby vertical tail"
+
+  REQ-022:
+    name: "Vstab AR Upper Bound"
+    far_section: "–"
+    category: geometry
+    description: "Vertical stabilizer aspect ratio maximum"
+    constraint: "vstab_aspect_ratio <= limit"
+    limit: 2.5
+    units: "–"
+    direction: "<="
+    verification: analysis
+    script_line: 1038
+    rationale: "Prevents excessively slender vstab (structural / flutter)"
+
+  # ---------------------------------------------------------------------------
+  # PERFORMANCE — Thrust Allocation
+  # ---------------------------------------------------------------------------
+  REQ-023:
+    name: "BLI Thrust Fraction Limit"
+    far_section: "–"
+    category: performance
+    description: "BLI tail pusher may not exceed 60% of total takeoff thrust"
+    constraint: "bli_thrust_at_liftoff <= thrust_at_liftoff * limit"
+    limit: 0.60
+    units: "–"
+    direction: "<="
+    verification: analysis
+    script_line: 1045
+    rationale: "Wingtip engines must remain primary propulsors — BLI is supplementary"
+
+  # ---------------------------------------------------------------------------
+  # MASS — Closure & Regulatory Cap
+  # ---------------------------------------------------------------------------
+  REQ-024:
+    name: "Mass Closure"
+    far_section: "–"
+    category: mass
+    description: "Sum of all component masses must not exceed design TOGW"
+    constraint: "mass_total <= design_mass_TOGW"
+    limit: null
+    units: "kg"
+    direction: "<="
+    verification: analysis
+    script_line: 1048
+    rationale: "Fundamental sizing loop closure — ensures weights converge"
+
+  REQ-025:
+    name: "MTOW Regulatory Cap"
+    far_section: "23.2005"
+    category: regulatory
+    description: "Maximum takeoff weight must not exceed design limit"
+    constraint: "design_mass_TOGW <= limit"
+    limit: 18000
+    units: "lb"
+    direction: "<="
+    verification: analysis
+    script_line: 1051
+    rationale: "BLI+WT design target — sized below 19,000 lb FAR 23 commuter limit"
